@@ -1,0 +1,35 @@
+{
+  "name": "@gatewarden/govern",
+  "version": "0.0.0",
+  "description": "Local-first capability-lease broker + in-path MCP enforcement proxy (vendored from leasebroker, run #2).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "bin": {
+    "leasebroker": "dist/cli/index.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli/index.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo": "bun ./scripts/demo.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@noble/ed25519": "^3.1.0",
+    "minimatch": "^10.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/server-filesystem": "^2026.1.14",
+    "@types/node": "^25.9.2",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.8"
+  }
+}

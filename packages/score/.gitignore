@@ -1,0 +1,25 @@
+# dependencies — bun.lock is the committed lockfile (bun is the dev tool); the npm lockfile is not used
+node_modules/
+/package-lock.json
+
+# build output
+dist/
+*.tsbuildinfo
+
+# env / secrets — never commit (history goes public at the reveal)
+.env
+.env.*
+!.env.example
+
+# logs / coverage / os
+*.log
+coverage/
+.DS_Store
+
+# agent / fleet runtime + internal SSOT — NEVER commit (hygiene gate)
+.pi/
+*.tmp
+.runtime/
+.beads/
+CLAUDE.local.md
+.cline/

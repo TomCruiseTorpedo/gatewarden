@@ -1,0 +1,21 @@
+{
+  "name": "gatewarden",
+  "version": "0.0.0",
+  "private": true,
+  "description": "MCP Gateway — one in-path proxy that scores a downstream MCP server's agent-usability and governs every tool call with capability leases. Fuses mcp-fit (score) and leasebroker (govern).",
+  "type": "module",
+  "license": "Apache-2.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "bun run --filter '*' build",
+    "typecheck": "bun run --filter '*' typecheck",
+    "test": "bun run --filter '*' test",
+    "test:score": "bun run --filter '@gatewarden/score' test",
+    "test:govern": "bun run --filter '@gatewarden/govern' test"
+  }
+}
