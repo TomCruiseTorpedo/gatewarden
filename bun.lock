@@ -5,6 +5,25 @@
     "": {
       "name": "gatewarden",
     },
+    "packages/gateway": {
+      "name": "@gatewarden/gateway",
+      "version": "0.0.0",
+      "bin": {
+        "gatewarden": "dist/cli/index.js",
+      },
+      "dependencies": {
+        "@gatewarden/govern": "workspace:*",
+        "@gatewarden/score": "workspace:*",
+        "@modelcontextprotocol/sdk": "^1.29.0",
+        "zod": "^4.4.3",
+      },
+      "devDependencies": {
+        "@modelcontextprotocol/server-filesystem": "^2026.1.14",
+        "@types/node": "^25.9.2",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8",
+      },
+    },
     "packages/govern": {
       "name": "@gatewarden/govern",
       "version": "0.0.0",
@@ -52,6 +71,8 @@
     "@emnapi/runtime": ["@emnapi/runtime@1.10.0", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-ewvYlk86xUoGI0zQRNq/mC+16R1QeDlKQy21Ki3oSYXNgLb45GV1P6A0M+/s6nyCuNDqe5VpaY84BzXGwVbwFA=="],
 
     "@emnapi/wasi-threads": ["@emnapi/wasi-threads@1.2.1", "", { "dependencies": { "tslib": "^2.4.0" } }, "sha512-uTII7OYF+/Mes/MrcIOYp5yOtSMLBWSIoLPpcgwipoiKbli6k322tcoFsxoIIxPDqW01SQGAgko4EzZi2BNv2w=="],
+
+    "@gatewarden/gateway": ["@gatewarden/gateway@workspace:packages/gateway"],
 
     "@gatewarden/govern": ["@gatewarden/govern@workspace:packages/govern"],
 

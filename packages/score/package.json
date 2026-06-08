@@ -4,6 +4,9 @@
   "description": "MCP server agent-usability scorer — scores and auto-fixes tool descriptions (vendored from mcp-fit, run #1)",
   "type": "module",
   "license": "Apache-2.0",
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "engines": {
     "node": ">=18"
   },

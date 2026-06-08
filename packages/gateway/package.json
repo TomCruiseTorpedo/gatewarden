@@ -1,14 +1,14 @@
 {
-  "name": "@gatewarden/govern",
+  "name": "@gatewarden/gateway",
   "version": "0.0.0",
-  "description": "Local-first capability-lease broker + in-path MCP enforcement proxy (vendored from leasebroker, run #2).",
+  "description": "MCP Gateway — one in-path proxy that scores a downstream MCP server and governs every tool call with capability leases. Fuses @gatewarden/score and @gatewarden/govern.",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts"
   },
   "bin": {
-    "leasebroker": "dist/cli/index.js"
+    "gatewarden": "dist/cli/index.js"
   },
   "engines": {
     "node": ">=20"
@@ -24,9 +24,9 @@
     "demo": "bun ./scripts/demo.mjs"
   },
   "dependencies": {
+    "@gatewarden/govern": "workspace:*",
+    "@gatewarden/score": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@noble/ed25519": "^3.1.0",
-    "minimatch": "^10.0.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
