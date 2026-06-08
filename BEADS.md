@@ -4,6 +4,8 @@
 
 > Fleet conventions (run #2 banked): `gt rig add <name> <url> --prefix <name>` then `gt rig settings set <name> role_agents.polecat pi` (NO `--polecat-agent`). `bd create` has NO `--skills` → fold into `-l labels`; `--deps` sets edges. Verify with `bun run test` NOT `bun test`. Contract bead lands Wave-0-ALONE.
 
+> Scaffold pre-provisioned (do NOT re-create): the two cores are vendored + green (`@gatewarden/score` 348 tests, `@gatewarden/govern` 221) with `exports` maps; `packages/gateway` exists with deps on both cores, strict tsconfig, `bin`/`demo` script + `server-filesystem` devDep, and a placeholder `src/index.ts`+`src/index.test.ts`. Full workspace `tsc`=0, `bun run test`/`build` green. Each bead ADDS its owned dir; only `gateway-005` edits `package.json` (build-script chmod). Beads import the contract via relative paths (`./contract/index.js`); the cores via `@gatewarden/score` / `@gatewarden/govern`.
+
 ---
 
 ## gateway-001 — contract (Wave 0, ALONE)
@@ -43,21 +45,21 @@
 **Labels:** `proxy`, `wave-2`, `appsec`.
 
 ## gateway-005 — CLI (Wave 3)
-**Owns:** `packages/gateway/src/cli/` + `bin` + `package.json` `bin` field for `gatewarden`.
+**Owns:** `packages/gateway/src/cli/` + `bin` + `package.json` `bin` field for `gatewarden`. Also restores the executable build step: set `package.json` `build` to `tsc && chmod +x dist/cli/index.js` (scaffold left it as bare `tsc` because no CLI existed yet).
 **Deps:** `gateway-004`.
 **Build:** `gatewarden` bin: `score <config>` (print keyless snapshot, no serve), `serve <config>` (run gateway), `rescore <config>` (fresh snapshot). Surface `govern`'s lifecycle commands (`request`/`approve`/`deny`/`pending`/`revoke`/`policy`/`audit`) through the gatewarden CLI (delegate to govern's command impls).
 **Acceptance:** `node dist/cli/index.js --help` lists the commands; `score` against the fs server prints a deterministic scorecard (R8, R2); veto commands reachable; `tsc`=0; vitest (CLI arg-parse unit tests) green; built bin is executable.
 **Labels:** `cli`, `wave-3`.
 
 ## gateway-006 — fixtures + demo (Wave 3)
-**Owns:** `packages/gateway/fixtures/` + `scripts/demo.mjs` + `package.json` `demo` script.
+**Owns:** `packages/gateway/fixtures/` + `scripts/demo.mjs`. (Does NOT edit `package.json` — the `demo` script and the `@modelcontextprotocol/server-filesystem` devDep are already scaffolded, so 005 and 006 never contend for `package.json` in Wave 3.)
 **Deps:** `gateway-004`.
 **Build:** fixture config fronting `@modelcontextprotocol/server-filesystem` with a sandbox dir containing an allowed file + a `private/` file; a tool→Action mapping for `read_file`/`write_file`; a policy + lease allowing the allowed path only. `scripts/demo.mjs`: attach → print scorecard → attempt `private/` read (DENIED) → in-scope read (OK), all keyless (R10).
 **Acceptance:** `bun run demo` prints a scorecard AND shows `private/` DENIED + allowed read OK in one flow, no API key, deterministic (R10); `tsc`=0.
 **Labels:** `demo`, `fixtures`, `wave-3`.
 
 ## gateway-007 — integration (Wave 4, first-class, independently verified)
-**Owns:** `packages/gateway/src/index.ts` (public API barrel), `packages/gateway/README.md`, a smoke test.
+**Owns:** `packages/gateway/src/index.ts` (public API barrel), `packages/gateway/README.md`, a smoke test. Replaces the scaffold placeholder `src/index.ts` (`__rehomeSmoke`) and removes the placeholder `src/index.test.ts` (the re-home smoke test) — its real smoke test supersedes them.
 **Deps:** `gateway-001..006`.
 **Build:** one canonical barrel re-exporting the gateway public API (`GatewardenProxy`, contract types, `buildToolActionResolver`, config loader, scoring). README with quickstart. Smoke test importing only the barrel.
 **Acceptance (verified independently, NOT self-report):** exactly one barrel, consumers import it; `bun run test` green across the WHOLE workspace (score 348 + govern 221 + gateway); `tsc`=0 workspace-wide; `bun run demo` R10 green keyless; AgentShield clean; fresh-clone build+test+demo certified before land.

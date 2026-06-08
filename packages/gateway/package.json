@@ -17,7 +17,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/cli/index.js",
+    "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
