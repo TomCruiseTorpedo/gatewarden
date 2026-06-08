@@ -1,20 +1,39 @@
 /**
- * @gatewarden/gateway — public API barrel (placeholder).
+ * @gatewarden/gateway — public API barrel.
  *
- * Scaffold placeholder so the workspace stays green (tsc + vitest) from minute
- * one. `gateway-001` (the contract bead) replaces this with the real barrel.
+ * Wave-0: contract types, schemas, and buildToolActionResolver.
+ * Subsequent waves (config, scoring, proxy, cli) will expand this barrel.
  *
- * The smoke imports below prove the re-home import surface resolves — the
- * gateway can pull a value + a type from BOTH vendored cores. Delete on first
- * real bead.
+ * Replaces the scaffold placeholder (`__rehomeSmoke`) — the contract is
+ * the first real export surface.
  */
 
-import { scoreLintOnly } from '@gatewarden/score';
-import type { Scorecard, ServerMeta } from '@gatewarden/score';
-import { LeaseEnforcer } from '@gatewarden/govern';
-import type { Action, Lease, PolicyRule } from '@gatewarden/govern';
+export type {
+  // Re-exported core types
+  Scorecard,
+  ServerMeta,
+  Action,
+  Lease,
+  PolicyRule,
+  Enforcer,
+  AuditSink,
+  ToolActionResolver,
+  // Gateway-specific types
+  DownstreamSpec,
+  StdioDownstreamSpec,
+  SseDownstreamSpec,
+  HttpDownstreamSpec,
+  ToolActionMapping,
+  GatewayConfig,
+  GatewaySnapshot,
+  // Schema inferred types
+  GatewayConfigInput,
+  GatewayConfigOutput,
+} from './contract/index.js';
 
-/** Re-home smoke: both cores resolve as workspace deps (value + type). */
-export const __rehomeSmoke = { scoreLintOnly, LeaseEnforcer } as const;
-
-export type { Scorecard, ServerMeta, Action, Lease, PolicyRule };
+export {
+  DownstreamSpecSchema,
+  ToolActionMappingSchema,
+  GatewayConfigSchema,
+  buildToolActionResolver,
+} from './contract/index.js';

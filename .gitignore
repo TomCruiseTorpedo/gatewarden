@@ -14,6 +14,8 @@ coverage/
 .beads/
 .runtime/
 CLAUDE.local.md
+CLAUDE.md
+.pi/
 
 # ---------------------------------------------------------------------------
 # Signing keys & secrets (this project signs leases — keys must never land)
