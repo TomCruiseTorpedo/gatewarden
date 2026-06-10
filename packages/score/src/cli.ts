@@ -22,6 +22,7 @@
  * Owns: src/cli.ts
  */
 
+import { readFileSync } from 'node:fs';
 import { mkdir } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 
@@ -41,7 +42,9 @@ import { AXIS_NAMES } from './types.js';
 // Version (sync with package.json)
 // ---------------------------------------------------------------------------
 
-const CLI_VERSION = '0.1.0';
+const CLI_VERSION = (JSON.parse(
+  readFileSync(new URL('../package.json', import.meta.url), 'utf8'),
+) as { version: string }).version;
 
 // ---------------------------------------------------------------------------
 // Help text

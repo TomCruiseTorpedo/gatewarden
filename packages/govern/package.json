@@ -1,14 +1,11 @@
 {
   "name": "@gatewarden/govern",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Local-first capability-lease broker + in-path MCP enforcement proxy (vendored from leasebroker, run #2).",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/index.ts"
-  },
-  "bin": {
-    "leasebroker": "dist/cli/index.js"
   },
   "engines": {
     "node": ">=20"
@@ -17,7 +14,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/cli/index.js",
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,5 +31,26 @@
     "@types/node": "^25.9.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TomCruiseTorpedo/gatewarden.git",
+    "directory": "packages/govern"
+  },
+  "bugs": {
+    "url": "https://github.com/TomCruiseTorpedo/gatewarden/issues"
+  },
+  "homepage": "https://github.com/TomCruiseTorpedo/gatewarden#readme",
+  "keywords": [
+    "mcp",
+    "agent",
+    "capability",
+    "least-privilege",
+    "lease",
+    "authorization",
+    "security"
+  ]
 }

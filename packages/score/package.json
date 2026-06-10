@@ -1,7 +1,7 @@
 {
   "name": "@gatewarden/score",
   "version": "0.1.0",
-  "description": "MCP server agent-usability scorer — scores and auto-fixes tool descriptions (vendored from mcp-fit, run #1)",
+  "description": "MCP server agent-usability scorer \u2014 scores and auto-fixes tool descriptions (vendored from mcp-fit, run #1)",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
@@ -10,18 +10,14 @@
   "engines": {
     "node": ">=18"
   },
-  "bin": {
-    "mcp-fit": "bin/mcp-fit"
-  },
   "files": [
     "dist",
-    "bin",
     "schemas",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -40,5 +36,26 @@
   "allowScripts": {
     "esbuild@0.21.5": true,
     "fsevents@2.3.3": true
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TomCruiseTorpedo/gatewarden.git",
+    "directory": "packages/score"
+  },
+  "bugs": {
+    "url": "https://github.com/TomCruiseTorpedo/gatewarden/issues"
+  },
+  "homepage": "https://github.com/TomCruiseTorpedo/gatewarden#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "llm",
+    "scorecard",
+    "agent-usability",
+    "linter"
+  ]
 }

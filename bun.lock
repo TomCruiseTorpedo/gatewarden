@@ -7,7 +7,7 @@
     },
     "packages/gateway": {
       "name": "@gatewarden/gateway",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "bin": {
         "gatewarden": "dist/cli/index.js",
       },
@@ -26,7 +26,7 @@
     },
     "packages/govern": {
       "name": "@gatewarden/govern",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "bin": {
         "leasebroker": "dist/cli/index.js",
       },
@@ -46,9 +46,6 @@
     "packages/score": {
       "name": "@gatewarden/score",
       "version": "0.1.0",
-      "bin": {
-        "mcp-fit": "bin/mcp-fit",
-      },
       "dependencies": {
         "@anthropic-ai/sdk": "^0.102.0",
         "@modelcontextprotocol/sdk": "^1.29.0",

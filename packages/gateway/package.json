@@ -1,7 +1,7 @@
 {
   "name": "@gatewarden/gateway",
-  "version": "0.0.0",
-  "description": "MCP Gateway — one in-path proxy that scores a downstream MCP server and governs every tool call with capability leases. Fuses @gatewarden/score and @gatewarden/govern.",
+  "version": "0.1.0",
+  "description": "MCP Gateway \u2014 one in-path proxy that scores a downstream MCP server and governs every tool call with capability leases. Fuses @gatewarden/score and @gatewarden/govern.",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
@@ -17,7 +17,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc && chmod +x dist/cli/index.js",
+    "build": "tsc -p tsconfig.build.json && chmod +x dist/cli/index.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -34,5 +34,27 @@
     "@types/node": "^25.9.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.8"
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TomCruiseTorpedo/gatewarden.git",
+    "directory": "packages/gateway"
+  },
+  "bugs": {
+    "url": "https://github.com/TomCruiseTorpedo/gatewarden/issues"
+  },
+  "homepage": "https://github.com/TomCruiseTorpedo/gatewarden#readme",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "gateway",
+    "proxy",
+    "security",
+    "least-privilege",
+    "capability"
+  ]
 }
