@@ -23,6 +23,9 @@
     "dist",
     "src",
     "!src/**/*.test.ts",
+    "!src/**/*.js",
+    "!src/**/*.d.ts",
+    "!src/**/*.map",
     "LICENSE"
   ],
   "scripts": {

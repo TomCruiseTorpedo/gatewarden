@@ -32,3 +32,8 @@ secrets/
 # ---------------------------------------------------------------------------
 .DS_Store
 *.tmp
+
+# never track compiled output inside src (TS-only source dirs)
+packages/*/src/**/*.js
+packages/*/src/**/*.d.ts
+packages/*/src/**/*.map

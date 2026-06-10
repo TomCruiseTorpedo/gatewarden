@@ -21,6 +21,9 @@
     "src",
     "!src/**/*.test.ts",
     "!src/**/__tests__/**",
+    "!src/**/*.js",
+    "!src/**/*.d.ts",
+    "!src/**/*.map",
     "LICENSE"
   ],
   "scripts": {
