@@ -16,6 +16,7 @@
     "typecheck": "bun run --filter '*' typecheck",
     "test": "bun run --filter '*' test",
     "test:score": "bun run --filter '@gatewarden/score' test",
-    "test:govern": "bun run --filter '@gatewarden/govern' test"
+    "test:govern": "bun run --filter '@gatewarden/govern' test",
+    "demo": "bun run --filter '@gatewarden/gateway' demo"
   }
 }

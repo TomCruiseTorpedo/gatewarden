@@ -15,7 +15,21 @@ Point it at a downstream server and you get a usability scorecard **and** least-
 | `@gatewarden/govern` | leases, signing (PASETO v4.public), policy, audit, per-call enforcer |
 | `@gatewarden/gateway` | the fusion: score-at-attach snapshot + in-path lease enforcement |
 
-The two cores are vendored from prior work and kept verbatim; the gateway is the thin composition over them.
+The two cores are vendored verbatim from their standalone repos — [mcp-fit](https://github.com/TomCruiseTorpedo/mcp-fit) (score) and [leasebroker](https://github.com/TomCruiseTorpedo/leasebroker) (govern); the gateway is the thin composition over them.
+
+## Quick demo (keyless)
+
+- `bun install`
+- `bun run demo`
+
+The demo fronts the reference filesystem MCP server, prints its agent-usability scorecard (deterministic — no API key needed), then proves enforcement in the same flow: an out-of-scope read of `private/secret.txt` is denied by the lease scope, while the in-scope read of `allowed.txt` succeeds.
+
+## CLI
+
+- `bun run build`
+- `bun packages/gateway/dist/cli/index.js --help`
+
+Gateway commands (`score`, `serve`, `rescore`) plus the full lease lifecycle (`request`, `approve`, `deny`, `pending`, `revoke`, `policy`, `audit`).
 
 ## Develop
 
@@ -32,7 +46,7 @@ The two cores are vendored from prior work and kept verbatim; the gateway is the
 
 ## Status
 
-Scaffold + design committed; the cores' suites are green (score 348, govern 221). The gateway package is being built bead-by-bead per `BEADS.md` (contract-first).
+v0.1.0 — built and certified from a fresh clone: 510 tests across the workspace (score 174, govern 221, gateway 115), typecheck and build green in all three packages, keyless demo green, CI green.
 
 ## License
 

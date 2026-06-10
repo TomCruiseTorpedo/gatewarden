@@ -8,7 +8,7 @@ A bun workspace (`packages/*`). Two cores are **vendored verbatim and already gr
 
 | package | origin | role | status |
 |---|---|---|---|
-| `@gatewarden/score` | mcp-fit (run #1) | introspect + lint + score a downstream → `Scorecard` | vendored, 348 tests green |
+| `@gatewarden/score` | mcp-fit (run #1) | introspect + lint + score a downstream → `Scorecard` | vendored, 174 tests green |
 | `@gatewarden/govern` | leasebroker (run #2) | leases, signing, policy, audit, per-call `Enforcer` | vendored, 221 tests green |
 | `@gatewarden/gateway` | NEW | fuse both behind one in-path proxy | to build |
 

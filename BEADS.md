@@ -4,7 +4,7 @@
 
 > Fleet conventions (run #2 banked): `gt rig add <name> <url> --prefix <name>` then `gt rig settings set <name> role_agents.polecat pi` (NO `--polecat-agent`). `bd create` has NO `--skills` → fold into `-l labels`; `--deps` sets edges. Verify with `bun run test` NOT `bun test`. Contract bead lands Wave-0-ALONE.
 
-> Scaffold pre-provisioned (do NOT re-create): the two cores are vendored + green (`@gatewarden/score` 348 tests, `@gatewarden/govern` 221) with `exports` maps; `packages/gateway` exists with deps on both cores, strict tsconfig, `bin`/`demo` script + `server-filesystem` devDep, and a placeholder `src/index.ts`+`src/index.test.ts`. Full workspace `tsc`=0, `bun run test`/`build` green. Each bead ADDS its owned dir; only `gateway-005` edits `package.json` (build-script chmod). Beads import the contract via relative paths (`./contract/index.js`); the cores via `@gatewarden/score` / `@gatewarden/govern`.
+> Scaffold pre-provisioned (do NOT re-create): the two cores are vendored + green (`@gatewarden/score` 174 tests, `@gatewarden/govern` 221) with `exports` maps; `packages/gateway` exists with deps on both cores, strict tsconfig, `bin`/`demo` script + `server-filesystem` devDep, and a placeholder `src/index.ts`+`src/index.test.ts`. Full workspace `tsc`=0, `bun run test`/`build` green. Each bead ADDS its owned dir; only `gateway-005` edits `package.json` (build-script chmod). Beads import the contract via relative paths (`./contract/index.js`); the cores via `@gatewarden/score` / `@gatewarden/govern`.
 
 ---
 
@@ -62,7 +62,7 @@
 **Owns:** `packages/gateway/src/index.ts` (public API barrel), `packages/gateway/README.md`, a smoke test. Replaces the scaffold placeholder `src/index.ts` (`__rehomeSmoke`) and removes the placeholder `src/index.test.ts` (the re-home smoke test) — its real smoke test supersedes them.
 **Deps:** `gateway-001..006`.
 **Build:** one canonical barrel re-exporting the gateway public API (`GatewardenProxy`, contract types, `buildToolActionResolver`, config loader, scoring). README with quickstart. Smoke test importing only the barrel.
-**Acceptance (verified independently, NOT self-report):** exactly one barrel, consumers import it; `bun run test` green across the WHOLE workspace (score 348 + govern 221 + gateway); `tsc`=0 workspace-wide; `bun run demo` R10 green keyless; AgentShield clean; fresh-clone build+test+demo certified before land.
+**Acceptance (verified independently, NOT self-report):** exactly one barrel, consumers import it; `bun run test` green across the WHOLE workspace (score 174 + govern 221 + gateway); `tsc`=0 workspace-wide; `bun run demo` R10 green keyless; AgentShield clean; fresh-clone build+test+demo certified before land.
 **Labels:** `integration`, `wave-4`, `appsec`.
 
 ---

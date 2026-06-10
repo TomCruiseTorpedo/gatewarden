@@ -6,11 +6,11 @@
 
 **Decision.** Vendor `mcp-fit` (run #1) and `leasebroker` (run #2) **verbatim** into a bun workspace as `packages/score` and `packages/govern`; build the gateway as a third package `packages/gateway` that depends on both. Do **not** import them as published/git dependencies.
 
-**Why not import-as-dep.** Neither prior repo publishes an `exports` map, neither is on npm, and both are PRIVATE GitHub repos. A git/npm dependency would force repo-scoped auth on every fleet polecat and CI runner, couple versions, and *still* require export-surface work on both. Re-home avoids all of that and is version-locked.
+**Why not import-as-dep.** Neither prior repo publishes an `exports` map, neither is on npm, and both were PRIVATE GitHub repos at decision time (both have since been made public). A git/npm dependency would force repo-scoped auth on every fleet polecat and CI runner, couple versions, and *still* require export-surface work on both. Re-home avoids all of that and is version-locked.
 
 **Why verbatim (not refactor-merge).** Run #3's stress axis is composition; the goal is to prove two existing contracts compose behind one seam without re-paying the divergence tax. Copying verbatim preserves both proven test suites (a green run *certifies* the copy) and confines all synthesis risk to the small new `packages/gateway`. Workspace isolation even lets each core keep its own TypeScript version.
 
-**Proven.** After re-home: `@gatewarden/govern` 221 tests (9 files) + `@gatewarden/score` 348 tests (18 files) = **569 green**; `tsc --noEmit` = 0 in both; SDK unified to `^1.29`. Re-home certified before any fleet bead.
+**Proven.** After re-home: `@gatewarden/govern` 221 tests (9 files) + `@gatewarden/score` 174 tests (9 files) = **395 green**; `tsc --noEmit` = 0 in both; SDK unified to `^1.29`. Re-home certified before any fleet bead. (An earlier count reported score at 348 — a stale `dist/` build was double-counting the suite; the integration pass excluded test files from emit and corrected the count.)
 
 **Consequences.** `score` keeps `ajv`+`@anthropic-ai/sdk`; `govern` keeps `zod@4`+`@noble/ed25519`. The two `ServerMeta`/proxy notions are NOT merged in v1 — the gateway adapts between them at its own seam (ADR-A). A later "refactor-merge" pass (unify the two proxies) is deferred and explicitly out of scope.
 
