@@ -14,7 +14,8 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
-    "types": ["node"]
+    "types": ["node"],
+    "customConditions": ["bun"]
   },
   "include": ["src"],
   "exclude": ["node_modules", "dist", "fixtures", "**/*.test.ts"]

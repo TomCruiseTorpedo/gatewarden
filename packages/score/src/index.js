@@ -1,0 +1,22 @@
+/**
+ * @gatewarden/score — public API barrel.
+ *
+ * Added during the P3 re-home (ADR-0) so the gateway package can import the
+ * scorer as a workspace dependency. mcp-fit was CLI-first and had no barrel;
+ * this re-exports the surface the gateway composition needs and nothing else
+ * changes (source + 348 tests untouched).
+ */
+// Shared contract types (Scorecard, ServerMeta, ServerIntrospection, McpTool,
+// AxisName, AxisScore, Finding, ToolDef, DescriptionOverride, …).
+export * from './types.js';
+// Scoring pipeline.
+export { score, scoreLintOnly } from './score/scorer.js';
+export { AXIS_LINEAGE, AXIS_WEIGHTS, weightedAggregate } from './score/axes.js';
+// Static lint engine.
+export { lint } from './lint/engine.js';
+// MCP connection + introspection.
+export { connectClient, McpConnectError } from './connect/client.js';
+export { introspect } from './connect/introspect.js';
+export { createTransport } from './connect/transports.js';
+// Re-presentation proxy (description overrides).
+export { McpProxy, applyOverridesToIntrospection } from './connect/proxy.js';
