@@ -16,3 +16,5 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test
+      - name: Score-engine drift guard
+        run: bun run --filter '@gatewarden/score' check:score-sync
