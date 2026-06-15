@@ -31,12 +31,17 @@ The demo fronts the reference filesystem MCP server, prints its agent-usability 
 
 Gateway commands (`score`, `serve`, `rescore`) plus the full lease lifecycle (`request`, `approve`, `deny`, `pending`, `revoke`, `policy`, `audit`).
 
+`@gatewarden/govern` also ships a standalone CLI (`packages/govern/dist/cli/index.js`) for the lease lifecycle without the gateway layer.
+
+Full scoring (the behavioural eval axes) needs `ANTHROPIC_API_KEY`; the keyless demo and the deterministic lint axes do not.
+
 ## Develop
 
 - `bun install`
 - `bun run test` — runs all package suites (vitest)
 - `bun run typecheck` — `tsc --noEmit` across the workspace
 - `bun run build` — compile all packages
+- `bun run --filter '@gatewarden/score' check:score-sync` — verify the vendored score engine hasn't drifted from its mcp-fit upstream (CI enforces this)
 
 ## Design
 
@@ -46,7 +51,7 @@ Gateway commands (`score`, `serve`, `rescore`) plus the full lease lifecycle (`r
 
 ## Status
 
-v0.1.0 — built and certified from a fresh clone: 510 tests across the workspace (score 174, govern 221, gateway 115), typecheck and build green in all three packages, keyless demo green, CI green.
+v0.1.0 (all three packages; the private root workspace stays `0.0.0`) — built and certified from a fresh clone: 510 tests across the workspace (score 174, govern 221, gateway 115), typecheck and build green in all three packages, keyless demo green, CI green.
 
 ## License
 
