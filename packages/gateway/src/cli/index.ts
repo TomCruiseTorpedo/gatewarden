@@ -35,6 +35,8 @@ import { cmdPending } from './commands/pending.js';
 import { cmdRevoke } from './commands/revoke.js';
 import { cmdPolicy } from './commands/policy.js';
 import { cmdAudit } from './commands/audit.js';
+import { cmdA2aAttach } from './commands/a2a-attach.js';
+import { cmdA2aCard } from './commands/a2a-card.js';
 
 // ---------------------------------------------------------------------------
 // Version
@@ -64,6 +66,14 @@ GATEWAY COMMANDS
   score <config>    Score the downstream server (deterministic, keyless)
   serve <config>    Start the gateway proxy fronting a downstream MCP server
   rescore <config>  Re-score the downstream and print a fresh snapshot
+
+A2A COMMANDS (ADR-H)
+  a2a-attach <cardUrl>   Read-only attach: fetch + score a remote agent's card
+                         (--out <dir> writes card-compat.json;
+                          --verify-keys <jwks.json> / --verify-jku = crypto tiers)
+  a2a-card <config>      Generate this gateway's own Agent Card from the
+                         governed tool surface (--interface-url required;
+                          --out <dir> writes agent-card.json)
 
 GOVERN LIFECYCLE COMMANDS
   request           Submit a lease request (reads JSON from --request or stdin)
@@ -293,6 +303,73 @@ async function main(): Promise<void> {
   const resolvedStateDir = resolveStateDir(stateDir);
 
   switch (command) {
+    // ── A2A commands (ADR-H) ────────────────────────────────────────────────
+
+    case 'a2a-attach': {
+      const { positionals, values } = parseArgs({
+        args: rest,
+        options: {
+          'state-dir': { type: 'string' as const },
+          out: { type: 'string' as const },
+          'verify-keys': { type: 'string' as const },
+          'verify-jku': { type: 'boolean' as const },
+        },
+        allowPositionals: true,
+        strict: false,
+      });
+      const cardUrl = positionals[0];
+      if (!cardUrl) {
+        console.error('Error: a2a-attach requires a <cardUrl> argument');
+        process.exit(1);
+      }
+      await cmdA2aAttach({
+        cardUrl,
+        ...(typeof values.out === 'string' ? { outDir: values.out } : {}),
+        ...(typeof values['verify-keys'] === 'string'
+          ? { verifyKeys: values['verify-keys'] }
+          : {}),
+        ...(values['verify-jku'] === true ? { verifyJku: true } : {}),
+      });
+      break;
+    }
+
+    case 'a2a-card': {
+      const { positionals, values } = parseArgs({
+        args: rest,
+        options: {
+          'state-dir': { type: 'string' as const },
+          out: { type: 'string' as const },
+          name: { type: 'string' as const },
+          description: { type: 'string' as const },
+          'card-version': { type: 'string' as const },
+          'interface-url': { type: 'string' as const },
+        },
+        allowPositionals: true,
+        strict: false,
+      });
+      const configPath = positionals[0];
+      const interfaceUrl = values['interface-url'];
+      if (!configPath) {
+        console.error('Error: a2a-card requires a <config-path> argument');
+        process.exit(1);
+      }
+      if (typeof interfaceUrl !== 'string' || interfaceUrl.length === 0) {
+        console.error('Error: a2a-card requires --interface-url <url>');
+        process.exit(1);
+      }
+      await cmdA2aCard({
+        configPath,
+        interfaceUrl,
+        ...(typeof values.out === 'string' ? { outDir: values.out } : {}),
+        ...(typeof values.name === 'string' ? { name: values.name } : {}),
+        ...(typeof values.description === 'string' ? { description: values.description } : {}),
+        ...(typeof values['card-version'] === 'string'
+          ? { cardVersion: values['card-version'] }
+          : {}),
+      });
+      break;
+    }
+
     // ── Gateway commands ────────────────────────────────────────────────────
 
     case 'score': {

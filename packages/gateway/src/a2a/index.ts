@@ -25,3 +25,13 @@ export type {
 
 export { generateAgentCard } from './card-generator.js';
 export type { CardGeneratorOptions } from './card-generator.js';
+
+export {
+  GatewardenAgentExecutor,
+  buildA2aServerFace,
+  parseToolInvocation,
+} from './server-face.js';
+export type {
+  DownstreamToolCaller,
+  GatewardenAgentExecutorOptions,
+} from './server-face.js';

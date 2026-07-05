@@ -110,3 +110,22 @@ the govern lane's A2A profile with the `A2A-Extensions` declaration.
 - Scenario: generated card dogfood — GIVEN the gateway's governed tool surface
   WHEN a card is generated THEN it lints error-free under the vendored card
   scorer and declares the lease extension required:true.
+
+### Requirement: A2A Upstream Server Face (ADR-I)
+
+The gateway MAY serve its governed MCP tool surface as an A2A agent: one
+`AgentExecutor` over the SDK server (`DefaultRequestHandler` supplies task
+store, `ListTasks`, version negotiation, and §5.4 errors), running the W3
+ingress ladder before forwarding permitted calls to the downstream. JSON-RPC
+binding only; streaming/push/extended-card declined.
+
+- Scenario: undeclared extension → protocol reject — GIVEN a request whose
+  requestedExtensions omit the lease URI WHEN executed THEN a REJECTED task is
+  published and the downstream is never called.
+- Scenario: failed lease → task rejected — GIVEN a declared client whose lease
+  fails enforcement WHEN executed THEN the task reaches REJECTED, no downstream call.
+- Scenario: pending veto → auth-required — GIVEN no token and a pending approval
+  WHEN executed THEN the task reaches AUTH_REQUIRED (A2A §7.6).
+- Scenario: permitted → governed forward — GIVEN a valid lease covering the
+  resolved action WHEN executed THEN the extension is activated, the downstream
+  tool is called once, and a COMPLETED task carries the result artifact.

@@ -62,3 +62,10 @@ export { scoreCardLintOnly } from './a2a/card-scorer.js';
 export { analyseSignatures } from './a2a/signature.js';
 export { CARD_AXIS_WEIGHTS, weightedCardAggregate } from './a2a/card-axes.js';
 export { validateCardScorecardSchema, emitCardCompat } from './a2a/emit.js';
+export {
+  verifyCardSignature,
+  canonicalCardPayload,
+  stripDefaults,
+  keyStoreFromJwks,
+} from './a2a/verify.js';
+export type { LocalKeyStore, VerifyCardOptions, JwksFetchLike } from './a2a/verify.js';

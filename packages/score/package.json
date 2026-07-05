@@ -1,7 +1,7 @@
 {
   "name": "@gatewarden/score",
   "version": "0.1.0",
-  "description": "MCP server agent-usability scorer \u2014 scores and auto-fixes tool descriptions (vendored from mcp-fit, run #1)",
+  "description": "MCP server agent-usability scorer — scores and auto-fixes tool descriptions (vendored from mcp-fit, run #1)",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
@@ -39,7 +39,9 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.102.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "ajv": "^8.17.1"
+    "ajv": "^8.17.1",
+    "canonicalize": "^3",
+    "jose": "^6"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",
