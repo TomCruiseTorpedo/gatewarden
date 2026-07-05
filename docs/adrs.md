@@ -55,3 +55,13 @@
 **Decision.** The whole workspace pins `@modelcontextprotocol/sdk` to `^1.29.x` (v1). Enforcement relies on `extra.sessionId` from the v1 low-level `setRequestHandler` API. Do not adopt the v2 migration branch (`ctx`).
 
 **Why.** `govern`'s session→lease binding is built on v1 `extra.sessionId`; `score` was on `^1.0` and bumped to `^1.29` during re-home with tests green. One SDK version hoists cleanly across the workspace.
+
+## ADR-H — A2A downstream lane: score-at-attach + govern-every-send, one SDK seam — ACCEPTED
+
+**Decision.** A2A support lands as a PARALLEL lane (`packages/gateway/src/a2a/`), leaving the MCP `DownstreamSpec`/config union untouched: `attachA2aSnapshot` fetches the RAW card (never through the SDK's auto-translating resolver — the scorecard must reflect the served document), scores it via the vendored card scorer (structural signature tier), and freezes an `A2aGatewaySnapshot`; `GovernedA2aDownstream` gates every outbound send BEFORE any wire traffic — baseline action = `http.call` to the agent's interface URL (leases scope WHICH agents may be delegated to via the existing endpoint allow-list; no new capability kinds), optional `spend` extracted from DataParts (present-but-malformed denies outright), the lease riding per the govern lane's W3 profile (metadata + extensions + `A2A-Extensions` service parameter). `generateAgentCard` maps the governed MCP tool surface to skills mechanically (name→id/name, description synthesized when absent, tags from the mapping kind, `inputSchema` drops out — A2A skills carry no parameter schema).
+
+**SDK.** `@a2a-js/sdk@1.0.0-beta.0` pinned EXACTLY, imported only under `src/a2a/` — the single re-pin point at 1.0 GA. Never `@latest` (0.3.x implements spec v0.3).
+
+**Deferred.** The full upstream A2A server face (task store, non-declinable `ListTasks` + pagination/authz, version negotiation, lease-binding ingress, card re-signing keys) — a new ingress subsystem, not an adapter; it gets its own workstream, and the config-union merge waits for it.
+
+**Why.** Composes the trilogy one protocol layer up: score what a remote agent DECLARES (card), govern what a delegation may DO (lease), through the same gateway posture. The parallel-lane shape keeps the shipped MCP surface and config schema stable while the beta SDK churns.

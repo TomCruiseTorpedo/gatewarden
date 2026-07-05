@@ -89,3 +89,24 @@ It is the trilogy capstone: it composes `score` (the agent-usability scorer, run
 - Demo shows R10 red→green keyless.
 - AgentShield scan clean (known gt-CLAUDE.md false positive excepted).
 - The two vendored cores' test suites remain green and unmodified (re-home preserved them).
+
+### Requirement: A2A Downstream (ADR-H)
+
+The gateway MUST attach to a remote A2A agent read-only — fetching the RAW
+Agent Card, scoring it with the vendored card scorer (structural signature
+tier), and freezing an `A2aGatewaySnapshot` — and MUST gate every outbound
+delegation before any wire traffic: baseline `http.call` action on the
+agent's interface URL, optional DataPart spend extraction, lease carried per
+the govern lane's A2A profile with the `A2A-Extensions` declaration.
+
+- Scenario: read-only attach — GIVEN a card URL WHEN attached THEN the
+  snapshot carries the card scorecard + signature tier AND no message is sent.
+- Scenario: deny is silent on the wire — GIVEN a lease that does not cover
+  the agent's endpoint WHEN sending THEN the send is denied, audited, and NO
+  request reaches the remote agent.
+- Scenario: lease carriage — GIVEN a permitted send THEN the message carries
+  the token at the extension-URI metadata key, lists the URI in extensions,
+  and declares it in A2A-Extensions.
+- Scenario: generated card dogfood — GIVEN the gateway's governed tool surface
+  WHEN a card is generated THEN it lints error-free under the vendored card
+  scorer and declares the lease extension required:true.

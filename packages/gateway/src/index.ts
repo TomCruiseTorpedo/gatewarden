@@ -61,3 +61,7 @@ export type { ScoringOptions } from './scoring/index.js';
 // ── Proxy (gateway-004) ───────────────────────────────────────────────────
 
 export { GatewardenProxy } from './proxy/index.js';
+
+// ── A2A downstream lane (ADR-H) ───────────────────────────────────────────
+
+export * from './a2a/index.js';

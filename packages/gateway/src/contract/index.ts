@@ -37,6 +37,12 @@ export type {
   ToolActionMapping,
   GatewayConfig,
   GatewaySnapshot,
+  // A2A downstream lane (ADR-H)
+  A2aDownstreamSpec,
+  A2aGatewaySnapshot,
+  A2aSendPolicy,
+  CardMeta,
+  CardScorecard,
 } from './types.js';
 
 // Schemas

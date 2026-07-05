@@ -159,3 +159,54 @@ export interface GatewaySnapshot {
   /** ISO 8601 timestamp of when this snapshot was taken. */
   readonly attachedAt: string;
 }
+
+// ---------------------------------------------------------------------------
+// A2A downstream (ADR-H) — a PARALLEL lane; the MCP DownstreamSpec above is
+// untouched. Config-union merge is deferred until the upstream A2A face lands.
+// ---------------------------------------------------------------------------
+
+import type { CardMeta, CardScorecard } from '@gatewarden/score';
+export type { CardMeta, CardScorecard };
+
+/**
+ * Specification for attaching a remote A2A agent as a governed downstream.
+ * v1 signature verification is the structural tier only (crypto tiers are
+ * reserved — the `mode` literal keeps the config forward-compatible).
+ */
+export type A2aDownstreamSpec = {
+  transport: 'a2a';
+  /** Agent Card URL — a bare origin gets /.well-known/agent-card.json (§8.2). */
+  cardUrl: string;
+  /** Signature verification tier (v1: structural only, ADR-H). */
+  verify?: { mode: 'structural' };
+};
+
+/**
+ * Immutable snapshot of an A2A downstream at attach time — the card-side
+ * mirror of GatewaySnapshot (R3 semantics: frozen, rescore = new snapshot).
+ * The scorecard embeds the SignatureReport (structural tier).
+ */
+export interface A2aGatewaySnapshot {
+  readonly card: CardMeta;
+  readonly cardScorecard: CardScorecard;
+  readonly attachedAt: string;
+}
+
+/**
+ * Derives the enforcement Action(s) for one outbound A2A send (ADR-H).
+ *
+ * Baseline (always): delegation itself is an `http.call` to the agent's
+ * interface URL — leases scope WHICH remote agents may be delegated to via
+ * their endpoint allow-list, reusing the existing capability vocabulary.
+ *
+ * Optional spend extraction: when configured and a DataPart carries BOTH
+ * keys, a `spend` action is additionally enforced. A present-but-malformed
+ * amount denies outright (deny-by-default, mirrors R6).
+ */
+export interface A2aSendPolicy {
+  /** DataPart keys carrying spend fields; omit to skip spend enforcement. */
+  spendExtraction?: {
+    currencyKey: string;
+    amountKey: string;
+  };
+}
