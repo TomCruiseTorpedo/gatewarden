@@ -37,6 +37,7 @@ import { cmdPolicy } from './commands/policy.js';
 import { cmdAudit } from './commands/audit.js';
 import { cmdA2aAttach } from './commands/a2a-attach.js';
 import { cmdA2aCard } from './commands/a2a-card.js';
+import { cmdA2aServe } from './commands/a2a-serve.js';
 
 // ---------------------------------------------------------------------------
 // Version
@@ -74,6 +75,9 @@ A2A COMMANDS (ADR-H)
   a2a-card <config>      Generate this gateway's own Agent Card from the
                          governed tool surface (--interface-url required;
                           --out <dir> writes agent-card.json)
+  a2a-serve <config>     Serve the governed tool surface as a live A2A agent
+                         (--interface-url required; --port <n>, --host <h>;
+                          well-known card + JSON-RPC endpoint, lease-gated)
 
 GOVERN LIFECYCLE COMMANDS
   request           Submit a lease request (reads JSON from --request or stdin)
@@ -361,6 +365,46 @@ async function main(): Promise<void> {
         configPath,
         interfaceUrl,
         ...(typeof values.out === 'string' ? { outDir: values.out } : {}),
+        ...(typeof values.name === 'string' ? { name: values.name } : {}),
+        ...(typeof values.description === 'string' ? { description: values.description } : {}),
+        ...(typeof values['card-version'] === 'string'
+          ? { cardVersion: values['card-version'] }
+          : {}),
+      });
+      break;
+    }
+
+    case 'a2a-serve': {
+      const { positionals, values } = parseArgs({
+        args: rest,
+        options: {
+          'state-dir': { type: 'string' as const },
+          'interface-url': { type: 'string' as const },
+          port: { type: 'string' as const },
+          host: { type: 'string' as const },
+          name: { type: 'string' as const },
+          description: { type: 'string' as const },
+          'card-version': { type: 'string' as const },
+        },
+        allowPositionals: true,
+        strict: false,
+      });
+      const configPath = positionals[0];
+      const interfaceUrl = values['interface-url'];
+      if (!configPath) {
+        console.error('Error: a2a-serve requires a <config-path> argument');
+        process.exit(1);
+      }
+      if (typeof interfaceUrl !== 'string' || interfaceUrl.length === 0) {
+        console.error('Error: a2a-serve requires --interface-url <url>');
+        process.exit(1);
+      }
+      const portRaw = typeof values.port === 'string' ? Number.parseInt(values.port, 10) : undefined;
+      await cmdA2aServe({
+        configPath,
+        interfaceUrl,
+        ...(portRaw !== undefined && Number.isFinite(portRaw) ? { port: portRaw } : {}),
+        ...(typeof values.host === 'string' ? { host: values.host } : {}),
         ...(typeof values.name === 'string' ? { name: values.name } : {}),
         ...(typeof values.description === 'string' ? { description: values.description } : {}),
         ...(typeof values['card-version'] === 'string'
