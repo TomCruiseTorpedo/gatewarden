@@ -34,3 +34,31 @@ export type {
 // Re-presentation proxy (description overrides).
 export { McpProxy, applyOverridesToIntrospection } from './connect/proxy.js';
 export type { ProxyOptions } from './connect/proxy.js';
+
+// A2A Agent Card scoring (ADR-F, vendored verbatim from mcp-fit src/a2a).
+export {
+  CARD_SCHEMA_VERSION,
+  A2A_SPEC_VERSION,
+  CARD_AXIS_NAMES,
+} from './a2a/card-types.js';
+export type {
+  AgentCardJson,
+  AgentSkillJson,
+  AgentInterfaceJson,
+  AgentExtensionJson,
+  AgentCardSignatureJson,
+  CardAxisName,
+  CardAxisScore,
+  CardFinding,
+  CardMeta,
+  CardScorecard,
+  SignatureReport,
+  SignatureTier,
+  SkillReport,
+} from './a2a/card-types.js';
+export { lintCard } from './a2a/card-engine.js';
+export type { CardLintResult } from './a2a/card-engine.js';
+export { scoreCardLintOnly } from './a2a/card-scorer.js';
+export { analyseSignatures } from './a2a/signature.js';
+export { CARD_AXIS_WEIGHTS, weightedCardAggregate } from './a2a/card-axes.js';
+export { validateCardScorecardSchema, emitCardCompat } from './a2a/emit.js';
