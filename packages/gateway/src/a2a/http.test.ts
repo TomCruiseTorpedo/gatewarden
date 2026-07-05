@@ -225,3 +225,83 @@ describe('message/send over live HTTP', () => {
     expect(badBody.error.code).toBe(-32700);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Signed card + live JWKS (ADR-I re-signing key)
+// ---------------------------------------------------------------------------
+
+describe('signed card over live HTTP', () => {
+  it('serves a signed card + JWKS and verifies at crypto-jku end-to-end', async () => {
+    const { generateCardSigningKeys, signAgentCard, verifyCardSignature } = await import(
+      '@gatewarden/score'
+    );
+    const keys = await generateCardSigningKeys({ kid: 'e2e-key' });
+
+    const unsigned = generateAgentCard(TOOLS, CONFIG.toolActions, {
+      name: 'Signed E2E Face',
+      description: 'Signed full-stack test face.',
+      version: '0.0.2',
+      interfaceUrl: 'http://127.0.0.1:0/a2a/v1',
+    });
+
+    // Sign FIRST with a placeholder jku, then rewrite once the port is known?
+    // No — sign against the real jku by binding the server in two phases is
+    // overkill for the test: serve on an ephemeral port, then embed the
+    // ACTUAL jku by signing after bind would change the card. Instead run a
+    // dedicated face whose jku we control: bind, read the port, sign with
+    // the live jku, and serve a SECOND face with the final signed card.
+    const probe = await serveA2aFace({
+      card: unsigned as never,
+      bundle,
+      downstream,
+      jwks: keys.jwks as { keys: unknown[] },
+    });
+    await probe.close();
+
+    const signedFace = await (async () => {
+      // Two-phase: reserve a port by binding once, close, rebind same port.
+      const first = await serveA2aFace({
+        card: unsigned as never,
+        bundle,
+        downstream,
+        jwks: keys.jwks as { keys: unknown[] },
+      });
+      const port = Number(new URL(first.url).port);
+      await first.close();
+      const jku = `http://127.0.0.1:${port}/.well-known/jwks.json`;
+      const signed = await signAgentCard(unsigned, keys.privateJwk, { jku });
+      return serveA2aFace({
+        card: signed as never,
+        bundle,
+        downstream,
+        jwks: keys.jwks as { keys: unknown[] },
+        port,
+      });
+    })();
+
+    try {
+      // The JWKS endpoint serves the public key…
+      const jwksResponse = await fetch(signedFace.jwksUrl!);
+      expect(jwksResponse.status).toBe(200);
+
+      // …and the raw served card verifies at crypto-jku via that live URL.
+      const rawCard = await (await fetch(signedFace.cardUrl)).json();
+      const report = await verifyCardSignature(rawCard as never, { fetchJku: true });
+      expect(report.tier).toBe('crypto-jku');
+
+      // Pinned beats jku when the key store is supplied too.
+      const pinned = await verifyCardSignature(rawCard as never, {
+        keyStore: { keys: { 'e2e-key': keys.publicJwk } },
+        fetchJku: true,
+      });
+      expect(pinned.tier).toBe('crypto-pinned');
+    } finally {
+      await signedFace.close();
+    }
+  });
+
+  it('returns 404 from the JWKS route when serving an unsigned card', async () => {
+    const response = await fetch(`${face.url}/.well-known/jwks.json`);
+    expect(response.status).toBe(404);
+  });
+});

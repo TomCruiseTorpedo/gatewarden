@@ -38,6 +38,7 @@ import { cmdAudit } from './commands/audit.js';
 import { cmdA2aAttach } from './commands/a2a-attach.js';
 import { cmdA2aCard } from './commands/a2a-card.js';
 import { cmdA2aServe } from './commands/a2a-serve.js';
+import { cmdA2aKeygen } from './commands/a2a-keygen.js';
 
 // ---------------------------------------------------------------------------
 // Version
@@ -77,7 +78,11 @@ A2A COMMANDS (ADR-H)
                           --out <dir> writes agent-card.json)
   a2a-serve <config>     Serve the governed tool surface as a live A2A agent
                          (--interface-url required; --port <n>, --host <h>;
+                          --signing-key <jwk> serves a SIGNED card + JWKS;
                           well-known card + JSON-RPC endpoint, lease-gated)
+  a2a-keygen             Mint a card-signing key pair (--out <dir>;
+                          --alg ES256|EdDSA, --kid <id>) — private JWK 0600
+                          + publishable jwks.json
 
 GOVERN LIFECYCLE COMMANDS
   request           Submit a lease request (reads JSON from --request or stdin)
@@ -337,6 +342,32 @@ async function main(): Promise<void> {
       break;
     }
 
+    case 'a2a-keygen': {
+      const { values } = parseArgs({
+        args: rest,
+        options: {
+          'state-dir': { type: 'string' as const },
+          out: { type: 'string' as const },
+          alg: { type: 'string' as const },
+          kid: { type: 'string' as const },
+        },
+        allowPositionals: true,
+        strict: false,
+      });
+      const outDir = typeof values.out === 'string' ? values.out : '.';
+      const alg = values.alg;
+      if (alg !== undefined && alg !== 'ES256' && alg !== 'EdDSA') {
+        console.error(`Error: --alg must be ES256 or EdDSA (got '${String(alg)}')`);
+        process.exit(1);
+      }
+      await cmdA2aKeygen({
+        outDir,
+        ...(alg !== undefined ? { alg } : {}),
+        ...(typeof values.kid === 'string' ? { kid: values.kid } : {}),
+      });
+      break;
+    }
+
     case 'a2a-card': {
       const { positionals, values } = parseArgs({
         args: rest,
@@ -347,6 +378,8 @@ async function main(): Promise<void> {
           description: { type: 'string' as const },
           'card-version': { type: 'string' as const },
           'interface-url': { type: 'string' as const },
+          'signing-key': { type: 'string' as const },
+          jku: { type: 'string' as const },
         },
         allowPositionals: true,
         strict: false,
@@ -370,6 +403,10 @@ async function main(): Promise<void> {
         ...(typeof values['card-version'] === 'string'
           ? { cardVersion: values['card-version'] }
           : {}),
+        ...(typeof values['signing-key'] === 'string'
+          ? { signingKey: values['signing-key'] }
+          : {}),
+        ...(typeof values.jku === 'string' ? { jku: values.jku } : {}),
       });
       break;
     }
@@ -385,6 +422,7 @@ async function main(): Promise<void> {
           name: { type: 'string' as const },
           description: { type: 'string' as const },
           'card-version': { type: 'string' as const },
+          'signing-key': { type: 'string' as const },
         },
         allowPositionals: true,
         strict: false,
@@ -409,6 +447,9 @@ async function main(): Promise<void> {
         ...(typeof values.description === 'string' ? { description: values.description } : {}),
         ...(typeof values['card-version'] === 'string'
           ? { cardVersion: values['card-version'] }
+          : {}),
+        ...(typeof values['signing-key'] === 'string'
+          ? { signingKey: values['signing-key'] }
           : {}),
       });
       break;

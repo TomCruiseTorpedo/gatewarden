@@ -7,9 +7,12 @@
  * W3 ingress ladder). Runs until SIGINT/SIGTERM.
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { introspect } from '@gatewarden/score';
+import { introspect, jwksFromPrivateJwk, signAgentCard } from '@gatewarden/score';
+import type { AgentCardJson } from '@gatewarden/score';
 import { loadConfig, wireGovern } from '../../config/index.js';
 import { generateAgentCard, serveA2aFace } from '../../a2a/index.js';
 import type { StdioDownstreamSpec } from '../../contract/index.js';
@@ -24,7 +27,10 @@ export interface A2aServeOptions {
   name?: string;
   description?: string;
   cardVersion?: string;
+  /** Private JWK file (from a2a-keygen) — serve a SIGNED card + JWKS. */
+  signingKey?: string;
 }
+
 
 export async function cmdA2aServe(opts: A2aServeOptions): Promise<void> {
   const config = await loadConfig(opts.configPath);
@@ -56,26 +62,44 @@ export async function cmdA2aServe(opts: A2aServeOptions): Promise<void> {
 
   const bundle = wireGovern(config);
 
-  const card = generateAgentCard(tools, config.toolActions, {
+  let card = generateAgentCard(tools, config.toolActions, {
     name: opts.name ?? `${server.name} (via Gatewarden)`,
     description:
       opts.description ??
       `Lease-governed A2A face for the MCP server "${server.name}" — every delegated call is scored and enforced by Gatewarden.`,
     version: opts.cardVersion ?? server.version,
     interfaceUrl: opts.interfaceUrl,
-  }) as unknown as AgentCard;
+  }) as AgentCardJson;
+
+  // Sign the served card when a key is provided (ADR-I: the re-signing key).
+  // jku points at the PUBLIC origin's well-known JWKS, which we also serve.
+  let jwks: { keys: unknown[] } | undefined;
+  if (opts.signingKey !== undefined) {
+    const privateJwk = JSON.parse(
+      readFileSync(resolve(opts.signingKey), 'utf8'),
+    ) as Parameters<typeof signAgentCard>[1];
+    jwks = jwksFromPrivateJwk(privateJwk);
+    const publicOrigin = new URL(opts.interfaceUrl).origin;
+    card = await signAgentCard(card, privateJwk, {
+      jku: `${publicOrigin}/.well-known/jwks.json`,
+    });
+  }
 
   const face = await serveA2aFace({
-    card,
+    card: card as unknown as AgentCard,
     bundle,
     downstream: {
       callTool: (name, args) => client.callTool({ name, arguments: args }),
     },
+    ...(jwks !== undefined ? { jwks } : {}),
     ...(opts.port !== undefined ? { port: opts.port } : {}),
     ...(opts.host !== undefined ? { host: opts.host } : {}),
   });
 
-  console.error(`gatewarden a2a-serve: agent card   ${face.cardUrl}`);
+  console.error(`gatewarden a2a-serve: agent card   ${face.cardUrl}${opts.signingKey !== undefined ? '  (SIGNED)' : ''}`);
+  if (face.jwksUrl !== undefined) {
+    console.error(`gatewarden a2a-serve: JWKS         ${face.jwksUrl}`);
+  }
   console.error(`gatewarden a2a-serve: JSON-RPC     ${face.endpointUrl}`);
   console.error(
     `gatewarden a2a-serve: fronting "${server.name}" (${tools.length} tool(s)); lease extension required`,

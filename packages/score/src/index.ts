@@ -69,3 +69,6 @@ export {
   keyStoreFromJwks,
 } from './a2a/verify.js';
 export type { LocalKeyStore, VerifyCardOptions, JwksFetchLike } from './a2a/verify.js';
+export { signAgentCard, generateCardSigningKeys } from './a2a/sign.js';
+export type { CardSigningKeys, CardSigningAlg, SignAgentCardOptions } from './a2a/sign.js';
+export { jwksFromPrivateJwk } from './a2a/sign.js';

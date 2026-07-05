@@ -46,6 +46,11 @@ export interface ServeA2aFaceOptions {
   host?: string;
   /** JSON-RPC endpoint path. Default '/a2a/v1'. */
   a2aPath?: string;
+  /**
+   * Public JWKS to serve at /.well-known/jwks.json — the verification keys
+   * for a signed card (crypto-jku tier). Omit when the card is unsigned.
+   */
+  jwks?: { keys: unknown[] };
   binding?: A2aLeaseBinding;
   /**
    * Veto-pending predicate. Default: any pending broker request whose taskId
@@ -60,6 +65,8 @@ export interface RunningA2aFace {
   /** Base URL actually bound, e.g. http://127.0.0.1:49321 */
   url: string;
   cardUrl: string;
+  /** JWKS URL — present only when serving a signed card. */
+  jwksUrl?: string | undefined;
   endpointUrl: string;
   close(): Promise<void>;
 }
@@ -69,6 +76,7 @@ export interface RunningA2aFace {
 // ---------------------------------------------------------------------------
 
 const WELL_KNOWN_PATH = '/.well-known/agent-card.json';
+const JWKS_PATH = '/.well-known/jwks.json';
 
 function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolvePromise, reject) => {
@@ -127,6 +135,16 @@ export async function serveA2aFace(options: ServeA2aFaceOptions): Promise<Runnin
     // ── Card availability (§8.1) ─────────────────────────────────────────
     if (req.method === 'GET' && url.pathname === WELL_KNOWN_PATH) {
       sendJson(res, 200, options.card);
+      return;
+    }
+
+    // ── Verification keys for the signed card (crypto-jku tier) ──────────
+    if (req.method === 'GET' && url.pathname === JWKS_PATH) {
+      if (options.jwks === undefined) {
+        sendJson(res, 404, { error: 'this agent card is not signed' });
+      } else {
+        sendJson(res, 200, options.jwks);
+      }
       return;
     }
 
@@ -203,6 +221,7 @@ export async function serveA2aFace(options: ServeA2aFaceOptions): Promise<Runnin
     server,
     url: base,
     cardUrl: `${base}${WELL_KNOWN_PATH}`,
+    jwksUrl: options.jwks !== undefined ? `${base}${JWKS_PATH}` : undefined,
     endpointUrl: `${base}${a2aPath}`,
     close: () =>
       new Promise<void>((resolvePromise, reject) =>
