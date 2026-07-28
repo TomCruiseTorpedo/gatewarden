@@ -36,7 +36,7 @@
     "demo": "bun ./scripts/demo.mjs"
   },
   "dependencies": {
-    "@a2a-js/sdk": "1.0.0-beta.0",
+    "@a2a-js/sdk": "1.0.1",
     "@gatewarden/govern": "workspace:*",
     "@gatewarden/score": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
