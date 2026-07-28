@@ -1,7 +1,7 @@
 {
   "name": "@gatewarden/score",
   "version": "0.1.0",
-  "description": "MCP server agent-usability scorer — scores and auto-fixes tool descriptions (vendored from mcp-fit, run #1)",
+  "description": "MCP server agent-usability scorer \u2014 scores and auto-fixes tool descriptions (vendored from mcp-fit, run #1)",
   "type": "module",
   "license": "Apache-2.0",
   "exports": {
@@ -34,6 +34,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:score-sync": "bash scripts/check-sync.sh",
+    "check:score-cross": "bash scripts/check-sync.sh --cross",
     "prepare": "npm run build"
   },
   "dependencies": {

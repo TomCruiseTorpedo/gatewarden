@@ -285,14 +285,23 @@ describe('signed card over live HTTP', () => {
       expect(jwksResponse.status).toBe(200);
 
       // …and the raw served card verifies at crypto-jku via that live URL.
+      //
+      // The jku fetch is SSRF-guarded and refuses loopback by default. This
+      // jku points at a server THIS TEST started moments ago on 127.0.0.1 —
+      // the one case the opt-in exists for: caller intent, not card intent.
+      // Production callers scoring third-party cards must never set it.
       const rawCard = await (await fetch(signedFace.cardUrl)).json();
-      const report = await verifyCardSignature(rawCard as never, { fetchJku: true });
+      const report = await verifyCardSignature(rawCard as never, {
+        fetchJku: true,
+        dangerouslyAllowPrivateJku: true,
+      });
       expect(report.tier).toBe('crypto-jku');
 
       // Pinned beats jku when the key store is supplied too.
       const pinned = await verifyCardSignature(rawCard as never, {
         keyStore: { keys: { 'e2e-key': keys.publicJwk } },
         fetchJku: true,
+        dangerouslyAllowPrivateJku: true,
       });
       expect(pinned.tier).toBe('crypto-pinned');
     } finally {
