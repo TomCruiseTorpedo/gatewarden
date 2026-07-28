@@ -11,6 +11,8 @@ export { InMemoryAuditSink } from './audit-sink.js';
 export { InMemoryPendingStore } from './pending-store.js';
 export { InMemoryRevocationList } from './revocation-list.js';
 export { InMemorySpendLedger } from './spend-ledger.js';
+export { InMemoryDurationLedger } from './duration-ledger.js';
+export type { DurationLedgerEntry, StoredDurationLedger } from './duration-ledger.js';
 
 // Stored-chain verification. Vendored from leasebroker as shared security
 // engine, not as a leasebroker feature: it is what lets a log be loaded
