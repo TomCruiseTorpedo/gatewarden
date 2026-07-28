@@ -24,3 +24,10 @@ jobs:
       # between the two halves of a two-repo change; land them back-to-back.
       - name: Score-engine cross-repo assertion
         run: bun run --filter '@gatewarden/score' check:score-cross
+      - name: Govern-engine drift guard
+        run: bun run --filter '@gatewarden/govern' check:govern-sync
+      # Asserts this repo's manifest is byte-identical to leasebroker's. Same
+      # reasoning as the score assertion above: the local guard alone lets both
+      # repos stay green while the vendored engines diverge.
+      - name: Govern-engine cross-repo assertion
+        run: bun run --filter '@gatewarden/govern' check:govern-cross

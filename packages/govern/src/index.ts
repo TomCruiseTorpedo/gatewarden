@@ -48,12 +48,14 @@ export { DeclarativePolicyEngine } from './policy/engine.js';
 export { loadRules } from './policy/loader.js';
 
 // ---------------------------------------------------------------------------
-// Audit lane (in-memory state stores)
+// Audit lane (in-memory state stores + stored-chain verification)
 // ---------------------------------------------------------------------------
 export { InMemoryAuditSink } from './audit/audit-sink.js';
 export { InMemoryPendingStore } from './audit/pending-store.js';
 export { InMemoryRevocationList } from './audit/revocation-list.js';
 export { InMemorySpendLedger } from './audit/spend-ledger.js';
+export { parseStoredAuditJsonl } from './audit/stored-chain.js';
+export type { AuditIntegrity, StoredAuditLog } from './audit/stored-chain.js';
 
 // ---------------------------------------------------------------------------
 // Broker lane (issuance orchestration)
