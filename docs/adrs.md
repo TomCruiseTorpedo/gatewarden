@@ -64,7 +64,7 @@
 
 **Deferred.** The full upstream A2A server face (task store, non-declinable `ListTasks` + pagination/authz, version negotiation, lease-binding ingress, card re-signing keys) — a new ingress subsystem, not an adapter; it gets its own workstream, and the config-union merge waits for it.
 
-**Why.** Composes the trilogy one protocol layer up: score what a remote agent DECLARES (card), govern what a delegation may DO (lease), through the same gateway posture. The parallel-lane shape keeps the shipped MCP surface and config schema stable while the beta SDK churns.
+**Why.** Composes the trilogy one protocol layer up: score what a remote agent DECLARES (card), govern what a delegation may DO (lease), through the same gateway posture. The parallel-lane shape keeps the shipped MCP surface and config schema stable across SDK churn — proven at the 1.0 GA re-pin, which cost zero source changes.
 
 ## ADR-I — A2A upstream server face: implement one AgentExecutor over the SDK server — ACCEPTED
 
@@ -74,7 +74,7 @@
 
 **Alternatives considered.** Hand-roll the task store + ListTasks + version negotiation (the original C7 assumption) — rejected: the SDK does it, and reimplementing a security-sensitive pagination/authz surface is strictly worse. Wrap `GatewardenProxy` (the MCP-serving proxy) — rejected: that serves the MCP protocol to clients; this serves A2A. They share the downstream client, not the server side.
 
-**Consequences.** The face is a bounded module, not a subsystem — C7's cost estimate was SDK-version-stale. HTTP endpoint wiring (mounting `transport.handle()` on a route) is the remaining integration step, left to the deployer; `DefaultRequestHandler`'s own `getAuthenticatedExtendedAgentCard` / push-notification hooks stay unused in v1. Card re-signing (a signed served card) still needs a gateway signing key — deferred with the HTTP wiring. The executor is the only server-side `@a2a-js/sdk` consumer, keeping the beta pin behind the `src/a2a/` seam.
+**Consequences.** The face is a bounded module, not a subsystem — C7's cost estimate was SDK-version-stale. HTTP endpoint wiring (mounting `transport.handle()` on a route) is the remaining integration step, left to the deployer; `DefaultRequestHandler`'s own `getAuthenticatedExtendedAgentCard` / push-notification hooks stay unused in v1. Card re-signing (a signed served card) still needs a gateway signing key — deferred with the HTTP wiring. The executor is the only server-side `@a2a-js/sdk` consumer, keeping the exact pin behind the `src/a2a/` seam.
 
 ## ADR-I addendum — HTTP mount (2026-07-05)
 
