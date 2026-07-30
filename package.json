@@ -17,6 +17,11 @@
     "test": "bun run --filter '*' test",
     "test:score": "bun run --filter '@gatewarden/score' test",
     "test:govern": "bun run --filter '@gatewarden/govern' test",
-    "demo": "bun run --filter '@gatewarden/gateway' demo"
+    "demo": "bun run --filter '@gatewarden/gateway' demo",
+    "check:workspace-pins": "bash scripts/check-workspace-pins.sh"
+  },
+  "overrides": {
+    "fast-uri": "^3.1.4",
+    "body-parser": "^2.3.0"
   }
 }
