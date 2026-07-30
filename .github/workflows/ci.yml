@@ -16,6 +16,13 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test
+      # packages/* depend on each other by concrete version rather than
+      # "workspace:*", so that npm can parse the manifests and produce the
+      # package-lock.json GitHub's dependency graph needs. The cost is that a
+      # sibling version bump silently redirects a dependent at the published
+      # tarball instead of the local source. This makes that drift loud.
+      - name: Workspace pin guard
+        run: bun run check:workspace-pins
       - name: Score-engine drift guard
         run: bun run --filter '@gatewarden/score' check:score-sync
       # Asserts this repo's manifest is byte-identical to mcp-fit's. The step

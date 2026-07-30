@@ -37,8 +37,8 @@
   },
   "dependencies": {
     "@a2a-js/sdk": "1.0.1",
-    "@gatewarden/govern": "workspace:*",
-    "@gatewarden/score": "workspace:*",
+    "@gatewarden/govern": "0.1.0",
+    "@gatewarden/score": "0.1.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "minimatch": "^10.0.1",
     "zod": "^4.4.3"
