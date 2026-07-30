@@ -16,6 +16,7 @@
         "@gatewarden/govern": "workspace:*",
         "@gatewarden/score": "workspace:*",
         "@modelcontextprotocol/sdk": "^1.29.0",
+        "minimatch": "^10.0.1",
         "zod": "^4.4.3",
       },
       "devDependencies": {
