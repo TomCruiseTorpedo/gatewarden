@@ -17,10 +17,21 @@
  *   - `tools/list`: delegate to downstream.
  *   - `tools/call`:
  *       - Resolve tool → Action via bundle.resolver.
- *       - Unmapped tool → passthrough (R5).
+ *       - Unmapped tool → forward ungoverned + audit `passthrough` (R5).
  *       - No token bound → deny + audit.
  *       - Enforcer denies → deny + audit.
  *       - Enforcer allows → forward + audit use event.
+ *
+ * Unmapped tools:
+ *   A tool with no mapped Action is forwarded transparently — no enforcement is
+ *   applied — and recorded as a `passthrough` audit event so the ungoverned call
+ *   is counted rather than invisible. A log that shows only governed traffic
+ *   invites the reader to infer there was no other kind.
+ *
+ * Audit attribution:
+ *   Every event raised after a successful token verification carries the lease
+ *   id from the VERIFIED lease. See `appendEvent` for why it is never sourced
+ *   from an unverified peek at the token.
  *
  * References: gateway-004, ADR-C, R1 R3 R4 R5 R7.
  */
@@ -35,7 +46,7 @@ import {
   ListToolsRequestSchema,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from '@modelcontextprotocol/sdk/types.js';
-import type { AuditEvent } from '@gatewarden/govern';
+import type { AuditEvent, AuditEventInput } from '@gatewarden/govern';
 import type { GovernBundle } from '../config/index.js';
 import type { GatewaySnapshot } from '../contract/index.js';
 import { attachSnapshot, rescore as rescoreDownstream } from '../scoring/index.js';
@@ -151,7 +162,20 @@ export class GatewardenProxy {
       const action = this.bundle.resolver(toolName, toolArgs);
 
       // Unmapped tool → forward transparently, no enforcement (R5).
+      //
+      // The call is NOT governed, but it IS counted. A `passthrough` event is
+      // deliberately not folded into `use`: a `use` event asserts that a lease
+      // was verified and the call fell within its scope, and neither happened
+      // here. Conflating them would make the log claim governance it did not
+      // perform. No leaseId — nothing was verified to attribute this to.
       if (action === undefined) {
+        this.appendEvent({
+          type: 'passthrough',
+          detail: {
+            toolName,
+            reason: 'no capability mapped to this tool name — forwarded without a lease check',
+          },
+        });
         const result = await this.downstreamClient.callTool({
           name: toolName,
           arguments: toolArgs,
@@ -164,21 +188,48 @@ export class GatewardenProxy {
 
       if (token === undefined) {
         // No token at all — deny and audit (R4).
-        this.appendEvent('denial', { toolName, reason: 'no lease token bound to session' });
+        this.appendEvent({
+          type: 'denial',
+          detail: { toolName, reason: 'no lease token bound to session' },
+        });
         return this.denyResult('no lease token bound to session');
       }
 
-      // Run the enforcer (R4).
+      // Run the enforcer (R4). It returns the VERIFIED lease with its verdict.
       const check = this.bundle.enforcer.check(token, action);
 
+      // Attribution for the audit trail, taken from that verified lease — never
+      // from an unverified peek at the token, which would attribute an action to
+      // a lease id no signature backs. A record like that is worse than one with
+      // no attribution at all, because it reads as authoritative.
+      //
+      // Denials from expiry, revocation or scope still carry it: those tokens
+      // verified, they simply did not authorize the call. Only a signature
+      // failure goes unattributed.
       if (!check.ok) {
         const reason = check.reason ?? 'enforcement denied';
-        this.appendEvent('denial', { toolName, reason, action });
+        this.appendEvent({
+          type: 'denial',
+          ...(check.lease !== undefined ? { leaseId: check.lease.id } : {}),
+          detail: {
+            toolName,
+            reason,
+            action,
+            ...(check.lease !== undefined ? { taskId: check.lease.taskId } : {}),
+          },
+        });
         return this.denyResult(reason);
       }
 
       // Permitted — emit use event and forward (R7).
-      this.appendEvent('use', { toolName, action });
+      //
+      // `check.ok` narrows `lease` to present, so the attribution a `use` event
+      // requires is guaranteed by the types rather than by a runtime guard.
+      this.appendEvent({
+        type: 'use',
+        leaseId: check.lease.id,
+        detail: { toolName, action, taskId: check.lease.taskId },
+      });
       const downstream = await this.downstreamClient.callTool({
         name: toolName,
         arguments: toolArgs,
@@ -262,14 +313,27 @@ export class GatewardenProxy {
     };
   }
 
-  private appendEvent(
-    type: AuditEvent['type'],
-    detail: Record<string, unknown>,
-  ): void {
+  /**
+   * Append one audit event.
+   *
+   * Takes the whole event as one object rather than `(type, detail, leaseId?)`
+   * so the discriminant narrows on the literal `type`, which is what lets the
+   * contract require `leaseId` on the kinds that cannot be stated without it.
+   * A widened `type` parameter would silently accept an unattributed `use`.
+   *
+   * `leaseId` is omitted entirely when absent rather than written as
+   * `undefined`, so an unattributable record is visibly missing the field
+   * instead of carrying an empty one.
+   *
+   * Callers must source `leaseId` from a VERIFIED lease. An audit record naming
+   * a lease id lifted from an unverified token looks authoritative while
+   * asserting something no signature backs — and the hash chain will seal it
+   * just as faithfully as a true one.
+   */
+  private appendEvent(input: AuditEventInput): void {
     const event: AuditEvent = {
-      type,
+      ...input,
       at: new Date().toISOString(),
-      detail,
       prevHash: '',
       hash: '',
     };

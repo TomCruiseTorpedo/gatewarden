@@ -29,7 +29,14 @@ import type { AgentCard, Message, Part, Task } from '@a2a-js/sdk';
 import { Role, TaskState } from '@a2a-js/sdk';
 
 import { LEASE_EXT_URI, attachLeaseToken } from '@gatewarden/govern';
-import type { Action, AuditEvent, AuditSink, Enforcer } from '@gatewarden/govern';
+import type {
+  Action,
+  AuditEvent,
+  AuditEventInput,
+  AuditSink,
+  Enforcer,
+  Lease,
+} from '@gatewarden/govern';
 import type { A2aSendPolicy } from '../contract/index.js';
 
 // ---------------------------------------------------------------------------
@@ -181,18 +188,57 @@ export class GovernedA2aDownstream {
     const derived = deriveSendActions(parts, this.opts.interfaceUrl, this.opts.policy);
     if ('malformed' in derived) {
       const denied: Action = { kind: 'http.call', endpoint: this.opts.interfaceUrl };
-      this.appendEvent('denial', { reason: derived.malformed, contextId: input.contextId });
+      // Nothing has been verified at this point — the payload was refused
+      // before any token check — so this denial is deliberately unattributed.
+      this.appendEvent({
+        type: 'denial',
+        detail: { reason: derived.malformed, contextId: input.contextId },
+      });
       return { sent: false, reason: derived.malformed, deniedAction: denied };
     }
 
     // ── 2. Enforce every derived action (deny on first failure) ────────────
+    //
+    // The enforcer returns the VERIFIED lease with its verdict, which is what
+    // attributes these events. Never peek at the token's claims unverified: a
+    // lease id no signature backs reads as authoritative once the hash chain
+    // seals it.
+    // `derived.actions` always holds at least the baseline http.call, so a
+    // completed loop has run at least one permitted check and `lease` is set.
+    let lease: Lease | undefined;
     for (const action of derived.actions) {
       const verdict = this.opts.enforcer.check(input.leaseToken, action);
       if (!verdict.ok) {
         const reason = verdict.reason ?? 'enforcement denied';
-        this.appendEvent('denial', { reason, action, contextId: input.contextId });
+        this.appendEvent({
+          type: 'denial',
+          ...(verdict.lease !== undefined ? { leaseId: verdict.lease.id } : {}),
+          detail: {
+            reason,
+            action,
+            contextId: input.contextId,
+            ...(verdict.lease !== undefined ? { taskId: verdict.lease.taskId } : {}),
+          },
+        });
         return { sent: false, reason, deniedAction: action };
       }
+      lease = verdict.lease;
+    }
+
+    if (lease === undefined) {
+      // Unreachable in practice: `derived.actions` always carries the baseline
+      // http.call, so the loop ran at least once and a permitted verdict brings
+      // its verified lease. Kept because the compiler cannot see that the array
+      // is non-empty — and because the honest response to "no attribution" is
+      // to refuse the `use` event, never to emit one that asserts a lease check
+      // it cannot name.
+      const reason = 'internal: enforcer allowed the send but returned no verified lease';
+      this.appendEvent({ type: 'denial', detail: { reason, contextId: input.contextId } });
+      return {
+        sent: false,
+        reason,
+        deniedAction: { kind: 'http.call', endpoint: this.opts.interfaceUrl },
+      };
     }
 
     // ── 3. Permitted: carry the lease per the W3 profile and send ──────────
@@ -211,10 +257,15 @@ export class GovernedA2aDownstream {
       input.leaseToken,
     ) as Message;
 
-    this.appendEvent('use', {
-      contextId: input.contextId,
-      actions: derived.actions,
-      endpoint: this.opts.interfaceUrl,
+    this.appendEvent({
+      type: 'use',
+      leaseId: lease.id,
+      detail: {
+        contextId: input.contextId,
+        taskId: lease.taskId,
+        actions: derived.actions,
+        endpoint: this.opts.interfaceUrl,
+      },
     });
 
     const result = await this.opts.client.sendMessage(
@@ -242,11 +293,17 @@ export class GovernedA2aDownstream {
 
   // -------------------------------------------------------------------------
 
-  private appendEvent(type: AuditEvent['type'], detail: Record<string, unknown>): void {
+  /**
+   * Append one audit event.
+   *
+   * Takes the whole event as one object so the discriminant narrows on the
+   * literal `type` — that is what lets the contract require `leaseId` on the
+   * kinds that cannot be stated without it.
+   */
+  private appendEvent(input: AuditEventInput): void {
     const event: AuditEvent = {
-      type,
+      ...input,
       at: new Date().toISOString(),
-      detail,
       prevHash: '',
       hash: '',
     };

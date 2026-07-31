@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { scoreCardLintOnly } from '@gatewarden/score';
 import type { McpTool } from '@gatewarden/score';
 import { LEASE_EXT_URI } from '@gatewarden/govern';
-import type { Action, AuditEvent, AuditSink, VerifyResult } from '@gatewarden/govern';
+import type { Action, AuditEvent, AuditSink, EnforceResult, Lease } from '@gatewarden/govern';
 
 import { attachA2aSnapshot, resolveCardUrl, type FetchLike } from './attach.js';
 import {
@@ -62,10 +62,28 @@ function fakeWire(): {
   return { client, sends };
 }
 
-/** Enforcer allowing everything except what `denyKinds` names. */
+/** The lease a permitted verdict is attributed to — `use` events must name one. */
+const STUB_LEASE: Lease = {
+  id: 'lease-a2a-stub',
+  agentId: 'agent-a2a-stub',
+  taskId: 'task-a2a-stub',
+  capabilities: [{ kind: 'http.call', endpoints: ['https://**'] }],
+  issuedAt: new Date(Date.now() - 1000).toISOString(),
+  expiresAt: new Date(Date.now() + 60_000).toISOString(),
+  kid: 'k1',
+};
+
+/**
+ * Enforcer allowing everything except what `denyKinds` names.
+ *
+ * Denials carry the lease too: the token verified, it simply did not authorize
+ * the action — which is precisely the case that stays attributable.
+ */
 const enforcerDenying = (denyKinds: ReadonlySet<Action['kind']>, reason = 'denied by test') => ({
-  check: (_token: string, action: Action): VerifyResult =>
-    denyKinds.has(action.kind) ? { ok: false, reason } : { ok: true },
+  check: (_token: string, action: Action): EnforceResult =>
+    denyKinds.has(action.kind)
+      ? { ok: false, reason, lease: STUB_LEASE }
+      : { ok: true, lease: STUB_LEASE },
 });
 
 const TOOLS: McpTool[] = [
@@ -196,6 +214,66 @@ describe('GovernedA2aDownstream.send', () => {
     const options = sends[0]?.options as { serviceParameters: Record<string, string> };
     expect(options.serviceParameters).toEqual({ ...LEASE_SERVICE_PARAMETERS });
     expect(events.map((e) => e.type)).toEqual(['use']);
+  });
+
+  // ── Audit attribution (this lane carried the same gap as the MCP proxy) ────
+  //
+  // Regression: `use` and `denial` events here were appended with no `leaseId`,
+  // so an A2A delegation was recorded without saying which lease authorized it.
+  it('attributes the use event to the verified lease', async () => {
+    const { client } = fakeWire();
+    const { sink, events } = fakeAudit();
+    const downstream = new GovernedA2aDownstream({
+      client,
+      interfaceUrl: URL_,
+      enforcer: enforcerDenying(new Set()),
+      audit: sink,
+    });
+
+    await downstream.send({ content: 'hi', contextId: 'ctx-7', leaseToken: 'tok' });
+
+    const use = events.find((e) => e.type === 'use');
+    expect(use).toBeDefined();
+    expect(use?.leaseId).toBe('lease-a2a-stub');
+    expect(use?.detail['taskId']).toBe('task-a2a-stub');
+  });
+
+  it('attributes a denial to the verified lease — the token was genuine', async () => {
+    const { client } = fakeWire();
+    const { sink, events } = fakeAudit();
+    const downstream = new GovernedA2aDownstream({
+      client,
+      interfaceUrl: URL_,
+      enforcer: enforcerDenying(new Set(['http.call']), 'endpoint not in lease scope'),
+      audit: sink,
+    });
+
+    await downstream.send({ content: 'hi', contextId: 'ctx-8', leaseToken: 'tok' });
+
+    const denial = events.find((e) => e.type === 'denial');
+    expect(denial).toBeDefined();
+    expect(denial?.leaseId).toBe('lease-a2a-stub');
+    expect(denial?.detail['taskId']).toBe('task-a2a-stub');
+  });
+
+  it('leaves a denial UNattributed when nothing was verified', async () => {
+    const { client } = fakeWire();
+    const { sink, events } = fakeAudit();
+    const downstream = new GovernedA2aDownstream({
+      client,
+      interfaceUrl: URL_,
+      // Signature failure: no lease to attribute to, so none must be invented.
+      enforcer: {
+        check: () => ({ ok: false, reason: 'signature verification failed' }),
+      },
+      audit: sink,
+    });
+
+    await downstream.send({ content: 'hi', contextId: 'ctx-9', leaseToken: 'forged' });
+
+    const denial = events.find((e) => e.type === 'denial');
+    expect(denial).toBeDefined();
+    expect(denial?.leaseId).toBeUndefined();
   });
 
   it('denies before any wire traffic when the lease does not cover the endpoint', async () => {
