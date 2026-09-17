@@ -145,6 +145,9 @@ describe('GatewardenProxy', () => {
     { content: Array<{ type: 'text'; text: string }> }
   >();
 
+  /** Number of tools/call requests that reached the mock downstream. */
+  let downstreamCalls = 0;
+
   beforeEach(async () => {
     // Fresh govern components per test.
     const kp = generateKeyPair('k1');
@@ -186,6 +189,7 @@ describe('GatewardenProxy', () => {
 
     // Mock downstream MCP server.
     downstreamResponses.clear();
+    downstreamCalls = 0;
     mockDownstream = new Server(
       { name: 'mock-downstream', version: '1.0.0' },
       { capabilities: { tools: {} } },
@@ -227,6 +231,7 @@ describe('GatewardenProxy', () => {
     }));
 
     mockDownstream.setRequestHandler(CallToolRequestSchema, (req) => {
+      downstreamCalls += 1;
       const toolName = req.params.name;
       const canned = downstreamResponses.get(toolName) ?? {
         content: [{ type: 'text' as const, text: `${toolName}: downstream ok` }],
@@ -389,6 +394,98 @@ describe('GatewardenProxy', () => {
 
       const result = response['result'] as Record<string, unknown> | undefined;
       expect(result?.['isError']).toBe(true);
+    });
+  });
+
+  // ── R4: session binding on transports with no session identity ─────────────
+
+  describe('session binding without a transport sessionId (R4, stdio)', () => {
+    beforeEach(() => {
+      // stdio never sets transport.sessionId, nor does streamable HTTP in
+      // stateless mode. Remove the fixture's id so the proxy sees what those
+      // transports present.
+      delete proxyServerTransport.sessionId;
+    });
+
+    it('enforces normally when the transport carries no session id', async () => {
+      // Keying the binding on sessionId alone filed the handshake token under
+      // `undefined` and never found it again, so every mapped call was denied
+      // for want of a token that was in fact presented.
+      await proxy.attach(proxyServerTransport, proxyClientTransport);
+
+      const lease = makeLease({ capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }] });
+      const token = signer.issue(lease);
+      downstreamResponses.set('read_file', {
+        content: [{ type: 'text', text: 'file contents' }],
+      });
+
+      await initSession(clientTransport, token);
+
+      const response = await sendAndWait(clientTransport, {
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'read_file', arguments: { path: '/data/readme.txt' } },
+      });
+
+      const result = response['result'] as Record<string, unknown> | undefined;
+      expect(result?.['isError']).toBeFalsy();
+      const content = result?.['content'] as Array<{ text: string }> | undefined;
+      expect(content?.[0]?.text).toBe('file contents');
+      expect(downstreamCalls).toBe(1);
+    });
+
+    it('still denies an out-of-scope call when the transport carries no session id', async () => {
+      // Binding under a shared key is about FINDING the token, not trusting
+      // it. Scope is still enforced.
+      await proxy.attach(proxyServerTransport, proxyClientTransport);
+
+      const lease = makeLease({ capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }] });
+      const token = signer.issue(lease);
+
+      await initSession(clientTransport, token);
+
+      const response = await sendAndWait(clientTransport, {
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'read_file', arguments: { path: '/secrets/key.pem' } },
+      });
+
+      const result = response['result'] as Record<string, unknown> | undefined;
+      expect(result?.['isError']).toBe(true);
+      expect(downstreamCalls).toBe(0);
+    });
+
+    it('a handshake presenting no token clears the binding rather than inheriting it', async () => {
+      // Under a shared binding key, a token left standing by an earlier
+      // handshake would let a tokenless client inherit that lease. The
+      // handshake is authoritative, so the absent case deletes.
+      await proxy.attach(proxyServerTransport, proxyClientTransport);
+
+      const lease = makeLease({ capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }] });
+      await initSession(clientTransport, signer.issue(lease), 1);
+
+      // Re-handshake with NO token in _meta.
+      await sendAndWait(clientTransport, {
+        id: 2,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: { name: 'test-client', version: '1.0.0' },
+        },
+      });
+
+      const response = await sendAndWait(clientTransport, {
+        id: 3,
+        method: 'tools/call',
+        params: { name: 'read_file', arguments: { path: '/data/readme.txt' } },
+      });
+
+      const result = response['result'] as Record<string, unknown> | undefined;
+      expect(result?.['isError']).toBe(true);
+      const content = result?.['content'] as Array<{ text: string }> | undefined;
+      expect(content?.[0]?.text).toMatch(/no lease token/i);
+      expect(downstreamCalls).toBe(0);
     });
   });
 
