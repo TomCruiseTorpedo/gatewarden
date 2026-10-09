@@ -125,6 +125,7 @@ export function loadPolicyRules(stateDir: string, rulesFilePath?: string): Polic
 }
 
 export function savePolicyRules(stateDir: string, rules: PolicyRule[]): void {
+  assertStillHeld('save the policy', stateDir);
   ensureDir(stateDir);
   writeFileAtomic(join(stateDir, 'policy.json'), JSON.stringify(rules, null, 2));
 }
@@ -317,12 +318,7 @@ export function saveState(state: CliState): void {
   }
   // Commit point: if this transaction no longer holds the lock, another command may have changed the
   // state since this one loaded it. Writing now would erase that change, so write nothing.
-  if (currentTransaction !== undefined && !currentTransaction.isHeld()) {
-    throw new LockLostError(
-      `refusing to save state: the lock on ${state.stateDir} was lost while this command was running, ` +
-        'so another command may have changed it. No state files were written; retry the command.',
-    );
-  }
+  assertStillHeld('save state', state.stateDir);
   // Order matters because a crash can land between files. Enforcement state goes first and the
   // audit log last: "revoked in force, not yet in the log" fails safe, while "revoked in the log,
   // still valid" is false assurance.
@@ -463,6 +459,7 @@ export function openServeSession(
               );
             }
             for (const event of mine) sink.append({ ...event, prevHash: '', hash: '' });
+            assertStillHeld('save the session', stateDir, lock);
             writeFileAtomic(
               join(stateDir, 'audit.jsonl'),
               sink
@@ -501,6 +498,23 @@ export class LockLostError extends Error {}
  * erase that change.
  */
 let currentTransaction: FileLockHandle | undefined;
+
+/**
+ * Fence a commit: refuse to write unless the lock this work runs under is still ours. Every path that
+ * commits under the state lock must call this immediately before its first write: `saveState`,
+ * `savePolicyRules` (`policy load` writes directly, not through `saveState`) and the serve session's
+ * audit merge. A path that skips it silently loses the protection the others have.
+ *
+ * @param lock the lock to check; defaults to the transaction running in this process, if any.
+ */
+function assertStillHeld(what: string, stateDir: string, lock: FileLockHandle | undefined = currentTransaction): void {
+  if (lock !== undefined && !lock.isHeld()) {
+    throw new LockLostError(
+      `refusing to ${what}: the lock on ${stateDir} was lost while this was running, ` +
+        'so another command may have changed it. Nothing was written; retry.',
+    );
+  }
+}
 
 function stateLockPath(stateDir: string): string {
   return join(stateDir, 'state.lock');

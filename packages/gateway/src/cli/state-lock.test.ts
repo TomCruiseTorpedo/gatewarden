@@ -33,6 +33,7 @@ import {
   loadState,
   openServeSession,
   publishExclusively,
+  savePolicyRules,
   saveState,
   withStateLock,
 } from './state.js';
@@ -129,6 +130,25 @@ describe('saveState inside a transaction is fenced by the lock', () => {
     ).rejects.toThrow(LockLostError);
 
     expect(existsSync(join(dir, 'revoked.json'))).toBe(false);
+  });
+
+  // `policy load` writes policy.json directly, not through saveState, so it needs the same fence.
+  it('also fences a policy write made inside the transaction', async () => {
+    await expect(
+      withStateLock(dir, () => {
+        writeFileSync(lockPath(), someoneElse());
+        savePolicyRules(dir, [
+          { ruleId: 'r', effect: 'allow', capabilityKind: 'fs.read', paths: ['/data/**'] },
+        ]);
+      }),
+    ).rejects.toThrow(LockLostError);
+
+    expect(existsSync(join(dir, 'policy.json'))).toBe(false);
+  });
+
+  it('writes a policy outside any transaction as before', () => {
+    savePolicyRules(dir, [{ ruleId: 'r', effect: 'allow', capabilityKind: 'fs.read', paths: ['/data/**'] }]);
+    expect(existsSync(join(dir, 'policy.json'))).toBe(true);
   });
 
   it("leaves the new holder's lock in place on the way out", async () => {
