@@ -56,8 +56,14 @@ function extractString(args: Record<string, unknown>, key: string, sentinel: str
 
 function extractAmount(args: Record<string, unknown>, key: string): number {
   const value = args[key];
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.round(value);
+  // The client chose this argument, so it is not trusted. Only a positive amount is a
+  // charge. Zero or less is not (a negative amount would be a REFUND: it would lower
+  // recorded spend), and neither is anything that is not a finite number; all of those
+  // become the sentinel, which no cap admits. A fraction rounds UP, so a sub-unit amount
+  // costs one minor unit instead of rounding down to a free call.
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    const minor = Math.ceil(value);
+    if (Number.isSafeInteger(minor)) return minor;
   }
   return SENTINEL_AMOUNT;
 }

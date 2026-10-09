@@ -54,9 +54,12 @@ audit log from the state directory (`--state-dir`, `GATEWARDEN_STATE_DIR`, or
 `.gatewarden/`), the same one `gatewarden request` and `gatewarden revoke` use.
 A lease minted by `request` therefore verifies in the running gateway, and a
 lease revoked from another process is refused on the very next call. A first run
-creates the key in that directory; keep it private. On shutdown the gateway
-merges only its own audit events and spend back, so it never undoes a `revoke`
-or drops events written meanwhile. It refuses to start on an audit log that fails
+creates the key in that directory; keep it private. Spend is charged against
+`spend.json` under a lock file as it happens, so several gateways on one state
+directory (stdio `serve` runs once per client) share one cap instead of each
+spending the full amount; if the lock cannot be taken in time the charge is
+refused. On shutdown the gateway merges only its own audit events back, so it
+never undoes a `revoke` or drops events written meanwhile. It refuses to start on an audit log that fails
 stored hash-chain verification (`gatewarden audit --verify`). Programmatic use
 (below) wires its own key per `wireGovern(config)` call unless you pass it
 persisted state.

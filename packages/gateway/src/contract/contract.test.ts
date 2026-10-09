@@ -293,6 +293,28 @@ describe('buildToolActionResolver', () => {
       expect(action?.kind === 'spend' && Number.isInteger(action.amountMinor)).toBe(true);
     });
 
+    // A client chooses these arguments, so the amount is attacker-controlled. Anything that is not a
+    // positive amount must become the deny-everything sentinel, never a charge of zero or less.
+    it.each([
+      ['negative', -1000],
+      ['zero', 0],
+      ['negative fraction that rounds to zero', -0.4],
+      ['NaN', Number.NaN],
+      ['Infinity', Number.POSITIVE_INFINITY],
+      ['a numeric string', '500'],
+    ])('treats a %s amount as unknown, so the cap check denies it', (_name, amount) => {
+      const action = resolver('charge', { currency: 'USD', amount });
+      expect(action).toEqual({ kind: 'spend', currency: 'USD', amountMinor: Number.MAX_SAFE_INTEGER });
+    });
+
+    it('charges a sub-unit fraction as one minor unit rather than letting it round down to free', () => {
+      expect(resolver('charge', { currency: 'USD', amount: 0.4 })).toEqual({
+        kind: 'spend',
+        currency: 'USD',
+        amountMinor: 1,
+      });
+    });
+
     it('returns Action (not undefined) when currency arg is missing (R6)', () => {
       const action = resolver('charge', { amount: 100 });
       expect(action).not.toBeUndefined();

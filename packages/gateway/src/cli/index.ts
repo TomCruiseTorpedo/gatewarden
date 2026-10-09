@@ -163,9 +163,10 @@ DESCRIPTION
   directory (default .gatewarden/), the same one 'gatewarden request' and
   'gatewarden revoke' use. A lease minted by 'request' therefore verifies here,
   and a revoked one is refused, including one revoked while serve is running.
-  On SIGINT/SIGTERM only this session's own audit events and spend are merged
-  back into the state directory; nothing else is rewritten. It refuses to start
-  on an audit log that fails stored hash-chain verification.
+  Spend is charged against spend.json under a lock as it happens, so several
+  gateways on one state directory share one spend cap. On SIGINT/SIGTERM only
+  this session's own audit events are merged back; nothing else is rewritten.
+  It refuses to start on an audit log that fails stored hash-chain verification.
 
 EXAMPLE
   gatewarden serve ./gateway.config.json
