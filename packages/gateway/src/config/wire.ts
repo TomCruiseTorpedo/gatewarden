@@ -37,7 +37,7 @@ import {
   LeaseEnforcer,
 } from '@gatewarden/govern';
 
-import type { Enforcer, AuditSink, ToolActionResolver } from '@gatewarden/govern';
+import type { Enforcer, AuditSink, KeyPair, ToolActionResolver } from '@gatewarden/govern';
 
 import { buildToolActionResolver } from '../contract/index.js';
 import type { GatewayConfig } from '../contract/index.js';
@@ -80,32 +80,65 @@ export interface GovernBundle {
 }
 
 // ---------------------------------------------------------------------------
+// GovernState — the persistable subset of the runtime
+// ---------------------------------------------------------------------------
+
+/**
+ * The parts of the govern runtime that outlive one process.
+ *
+ * `gatewarden request`, `revoke` and `audit` each run as their own process and
+ * share these through the state directory. The structural shape matches the
+ * CLI's `CliState` (which carries a `stateDir` as well), so a loaded CLI state
+ * can be passed straight in.
+ */
+export interface GovernState {
+  /** Signing key. Leases verify only against the key that signed them. */
+  keyPair: KeyPair;
+  auditSink: InMemoryAuditSink;
+  pendingStore: InMemoryPendingStore;
+  revocationList: InMemoryRevocationList;
+  spendLedger: InMemorySpendLedger;
+}
+
+// ---------------------------------------------------------------------------
 // wireGovern
 // ---------------------------------------------------------------------------
 
 /**
  * Construct the full govern runtime from a validated GatewayConfig.
  *
- * Key ID defaults to `"k1"` — a stable identifier for the initial signing key.
+ * Without `state`, every component is fresh and the signing key is generated
+ * for this call alone, so only the bundle's own broker can mint a lease its
+ * enforcer will accept. That suits in-process use and tests, and it is the wrong
+ * wiring for a process that must honour leases issued elsewhere.
+ *
+ * With `state`, the key, audit sink, revocation list, spend ledger and pending
+ * store are adopted rather than created, so this bundle verifies the leases
+ * `gatewarden request` issued and honours the revocations `gatewarden revoke`
+ * recorded. This is how `gatewarden serve` is wired. The caller owns persisting
+ * the state again.
+ *
+ * Key ID defaults to `"k1"` for a generated key; a supplied key keeps its own.
  * The proxy layer passes the token back through the enforcer (same signer),
  * so the key always resolves from the keyring.
  *
  * @param config - A validated GatewayConfig (from loadConfig).
+ * @param state  - Optional persisted components to adopt (see GovernState).
  * @returns     A fully wired GovernBundle.
  */
-export function wireGovern(config: GatewayConfig): GovernBundle {
+export function wireGovern(config: GatewayConfig, state?: GovernState): GovernBundle {
   // ── 1. Signing lane ───────────────────────────────────────────────────────
-  const keyPair = generateKeyPair('k1');
+  const keyPair = state?.keyPair ?? generateKeyPair('k1');
   const signer = new PasetoV4PublicSigner(keyPair);
 
   // ── 2. Policy lane ────────────────────────────────────────────────────────
   const policy = new DeclarativePolicyEngine(config.policy);
 
   // ── 3. Audit lane ─────────────────────────────────────────────────────────
-  const audit = new InMemoryAuditSink();
-  const revocationList = new InMemoryRevocationList();
-  const spendLedger = new InMemorySpendLedger();
-  const pendingStore = new InMemoryPendingStore();
+  const audit = state?.auditSink ?? new InMemoryAuditSink();
+  const revocationList = state?.revocationList ?? new InMemoryRevocationList();
+  const spendLedger = state?.spendLedger ?? new InMemorySpendLedger();
+  const pendingStore = state?.pendingStore ?? new InMemoryPendingStore();
 
   // ── 4. Broker ─────────────────────────────────────────────────────────────
   // The kid passed to Broker must match the signer's active key so that

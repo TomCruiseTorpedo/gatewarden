@@ -78,6 +78,9 @@ A2A COMMANDS (ADR-H)
                           --out <dir> writes agent-card.json)
   a2a-serve <config>     Serve the governed tool surface as a live A2A agent
                          (--interface-url required; --port <n>, --host <h>;
+                          leases come from the state dir, like serve;
+                          --require-token-per-message: token on EVERY message,
+                          no bearer contextId;
                           --signing-key <jwk> serves a SIGNED card + JWKS;
                           well-known card + JSON-RPC endpoint, lease-gated)
   a2a-keygen             Mint a card-signing key pair (--out <dir>;
@@ -149,14 +152,20 @@ EXAMPLE
 gatewarden serve <config> — start the gateway proxy
 
 USAGE
-  gatewarden serve <config-path>
+  gatewarden serve <config-path> [--state-dir <path>]
 
 ARGUMENTS
   <config-path>   Path to a GatewayConfig JSON or JS file
 
 DESCRIPTION
-  Wires the govern runtime from the config (policy, signer, broker, enforcer)
-  and starts an enforcing MCP proxy on stdio fronting the downstream server.
+  Starts an enforcing MCP proxy on stdio fronting the downstream server.
+  The signing key, revocations, spend ledger and audit log come from the state
+  directory (default .gatewarden/), the same one 'gatewarden request' and
+  'gatewarden revoke' use. A lease minted by 'request' therefore verifies here,
+  and a revoked one is refused, including one revoked while serve is running.
+  On SIGINT/SIGTERM only this session's own audit events and spend are merged
+  back into the state directory; nothing else is rewritten. It refuses to start
+  on an audit log that fails stored hash-chain verification.
 
 EXAMPLE
   gatewarden serve ./gateway.config.json
@@ -423,6 +432,7 @@ async function main(): Promise<void> {
           description: { type: 'string' as const },
           'card-version': { type: 'string' as const },
           'signing-key': { type: 'string' as const },
+          'require-token-per-message': { type: 'boolean' as const },
         },
         allowPositionals: true,
         strict: false,
@@ -451,6 +461,8 @@ async function main(): Promise<void> {
         ...(typeof values['signing-key'] === 'string'
           ? { signingKey: values['signing-key'] }
           : {}),
+        stateDir: resolvedStateDir,
+        ...(values['require-token-per-message'] === true ? { requireTokenPerMessage: true } : {}),
       });
       break;
     }
@@ -485,7 +497,7 @@ async function main(): Promise<void> {
         console.error('Error: serve requires a <config-path> argument');
         process.exit(1);
       }
-      await cmdServe({ configPath });
+      await cmdServe({ configPath, stateDir: resolvedStateDir });
       break;
     }
 
