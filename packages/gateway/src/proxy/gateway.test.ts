@@ -4,8 +4,9 @@
  * Architecture under test:
  *   test-client ↔ [GatewardenProxy server] → [enforcer] → [GatewardenProxy client] ↔ mock-downstream
  *
- * All transports are InMemoryTransport — no network, no subprocesses.
- * Govern bundle is wired directly (no config file I/O).
+ * All transports are InMemoryTransport — no network, no subprocesses — except the
+ * final describe block, which drives the REAL StdioServerTransport over in-process
+ * pipes. Govern bundle is wired directly (no config file I/O).
  *
  * Acceptance criteria:
  *   R1  — attach yields snapshot AND enforcement live in ONE flow (single downstream client)
@@ -16,9 +17,11 @@
  *   tsc = 0; vitest green
  */
 
+import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
+import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -796,5 +799,213 @@ describe('GatewardenProxy', () => {
       expect(events[0]?.type).toBe('use');
       expect(events[1]?.type).toBe('denial');
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Session binding over a REAL stdio transport
+// ---------------------------------------------------------------------------
+
+/**
+ * Regression coverage for the stdio session-binding defect.
+ *
+ * Every proxy test above drives an InMemoryTransport. The main fixture assigns
+ * `proxyServerTransport.sessionId` by hand, and the "without a transport
+ * sessionId" block deletes it again, but even that block only simulates what
+ * stdio presents. The real StdioServerTransport never sets `sessionId`, so a
+ * token bound at `initialize` and keyed on `extra.sessionId` alone was filed
+ * under `undefined` and never found again: the published proxy denied every
+ * mapped tool call over stdio while the suite stayed green.
+ *
+ * These tests therefore use the REAL StdioServerTransport class over real
+ * pipes, speaking real newline-delimited JSON framing, and assign no session
+ * identity anywhere. A test that supplies or simulates its own sessionId cannot
+ * fail the way production failed, so it is not coverage of this bug.
+ */
+describe('GatewardenProxy over a real stdio transport', () => {
+  let signer: PasetoV4PublicSigner;
+  let audit: InMemoryAuditSink;
+  let mockDownstream: Server;
+  let proxy: GatewardenProxy;
+  let stdioTransport: StdioServerTransport;
+
+  /** Number of tools/call requests that reached the mock downstream. */
+  let downstreamCalls: number;
+
+  /** Client → proxy stdin, and proxy stdout → client. */
+  let toProxy: PassThrough;
+  let fromProxy: PassThrough;
+  /** Responses parsed off the proxy's stdout, keyed by JSON-RPC id. */
+  let responses: Map<number, Record<string, unknown>>;
+
+  beforeEach(async () => {
+    const kp = generateKeyPair('k1');
+    signer = new PasetoV4PublicSigner(kp);
+    audit = new InMemoryAuditSink();
+    const revocationList = new InMemoryRevocationList();
+    const spendLedger = new InMemorySpendLedger();
+
+    const bundle: GovernBundle = {
+      signer,
+      policy: null as never,
+      audit,
+      revocationList,
+      spendLedger,
+      pendingStore: null as never,
+      broker: null as never,
+      enforcer: new LeaseEnforcer(signer, revocationList, spendLedger),
+      resolver: (toolName, args) => {
+        if (toolName === 'read_file') {
+          const path = typeof args['path'] === 'string' ? args['path'] : '';
+          return { kind: 'fs.read', path };
+        }
+        return undefined;
+      },
+    };
+
+    downstreamCalls = 0;
+    mockDownstream = new Server(
+      { name: 'mock-downstream', version: '1.0.0' },
+      { capabilities: { tools: {} } },
+    );
+    mockDownstream.setRequestHandler(ListToolsRequestSchema, () => ({
+      tools: [
+        {
+          name: 'read_file',
+          description: 'Read a file. Returns the file contents as a string.',
+          inputSchema: {
+            type: 'object' as const,
+            properties: { path: { type: 'string', description: 'Absolute path to read.' } },
+            required: ['path'],
+          },
+        },
+      ],
+    }));
+    mockDownstream.setRequestHandler(CallToolRequestSchema, (req) => {
+      downstreamCalls += 1;
+      return { content: [{ type: 'text' as const, text: `${req.params.name}: ok` }] };
+    });
+    const [proxyClientTransport, downstreamServerTransport] =
+      InMemoryTransport.createLinkedPair();
+    await mockDownstream.connect(downstreamServerTransport);
+
+    // The real stdio transport, over real pipes. No sessionId is set here —
+    // that is the whole point, and StdioServerTransport never sets one itself.
+    toProxy = new PassThrough();
+    fromProxy = new PassThrough();
+    stdioTransport = new StdioServerTransport(toProxy, fromProxy);
+
+    responses = new Map();
+    let buffer = '';
+    fromProxy.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString('utf8');
+      let idx: number;
+      while ((idx = buffer.indexOf('\n')) !== -1) {
+        const line = buffer.slice(0, idx);
+        buffer = buffer.slice(idx + 1);
+        if (line.trim() === '') continue;
+        const msg = JSON.parse(line) as Record<string, unknown>;
+        if (typeof msg['id'] === 'number') responses.set(msg['id'], msg);
+      }
+    });
+
+    proxy = new GatewardenProxy(bundle);
+    await proxy.attach(stdioTransport, proxyClientTransport);
+  });
+
+  afterEach(async () => {
+    await proxy.close().catch(() => {});
+    await mockDownstream.close().catch(() => {});
+  });
+
+  /** Write one newline-delimited JSON-RPC message to the proxy's stdin. */
+  function writeMessage(msg: Record<string, unknown>): void {
+    toProxy.write(JSON.stringify({ jsonrpc: '2.0', ...msg }) + '\n');
+  }
+
+  /** Wait for the response with the given id to appear on the proxy's stdout. */
+  async function awaitResponse(id: number): Promise<Record<string, unknown>> {
+    for (let i = 0; i < 200; i++) {
+      const hit = responses.get(id);
+      if (hit !== undefined) return hit;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error(`Timeout waiting for response to id=${id}`);
+  }
+
+  /** Run the initialize handshake, presenting `token` in `_meta` when given. */
+  async function handshake(token?: string): Promise<void> {
+    writeMessage({
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-11-25',
+        capabilities: {},
+        clientInfo: { name: 'stdio-test-client', version: '1.0.0' },
+        ...(token !== undefined ? { _meta: { 'x-lease-token': token } } : {}),
+      },
+    });
+    await awaitResponse(1);
+    writeMessage({ method: 'notifications/initialized' });
+  }
+
+  async function callReadFile(path: string): Promise<{
+    isError: unknown;
+    text: string | undefined;
+  }> {
+    writeMessage({
+      id: 2,
+      method: 'tools/call',
+      params: { name: 'read_file', arguments: { path } },
+    });
+    const result = (await awaitResponse(2))['result'] as Record<string, unknown>;
+    const content = result['content'] as Array<{ text: string }>;
+    return { isError: result['isError'], text: content[0]?.text };
+  }
+
+  it('binds the lease token presented at initialize and forwards an in-scope call', async () => {
+    // Guards the premise: if the SDK ever starts setting a stdio sessionId,
+    // these tests would stop exercising the session-less path.
+    expect(stdioTransport.sessionId).toBeUndefined();
+
+    const token = signer.issue(makeLease({ capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }] }));
+    await handshake(token);
+
+    const { isError, text } = await callReadFile('/data/report.txt');
+
+    // The precise failure this guards: the binding is lost, so an in-scope call
+    // is refused for having no token rather than being forwarded.
+    expect(text).not.toContain('no lease token bound to session');
+    expect(isError).toBeFalsy();
+    expect(text).toBe('read_file: ok');
+    expect(downstreamCalls).toBe(1);
+  });
+
+  it('still denies an out-of-scope call over stdio', async () => {
+    const token = signer.issue(makeLease({ capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }] }));
+    await handshake(token);
+
+    const { isError, text } = await callReadFile('/etc/shadow');
+
+    // Restoring the binding must not cost enforcement: this has to be denied on
+    // SCOPE, not for a missing token.
+    expect(isError).toBe(true);
+    expect(text).toContain('not permitted by the lease scope');
+    expect(text).not.toContain('no lease token bound to session');
+    expect(downstreamCalls).toBe(0);
+  });
+
+  it('denies when the handshake presented no token at all', async () => {
+    // Negative control: it must stay green with the binding fix reverted, which
+    // proves the two tests above fail because of the binding and not because
+    // the harness cannot tell a presented token from an absent one.
+    await handshake();
+
+    const { isError, text } = await callReadFile('/data/report.txt');
+
+    // The shared binding key must not become a way to call with no lease.
+    expect(isError).toBe(true);
+    expect(text).toContain('no lease token bound to session');
+    expect(downstreamCalls).toBe(0);
   });
 });
