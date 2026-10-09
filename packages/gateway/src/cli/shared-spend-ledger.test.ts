@@ -44,7 +44,7 @@ const onDisk = (): Record<string, { spent: number; cap: number }> =>
 
 /** What a lock file holds: who took it, and from which host and pid namespace. */
 function lockRecord(pid: number, host: string = hostname(), pidns: string | null = null): string {
-  return JSON.stringify({ pid, host, pidns });
+  return JSON.stringify({ pid, host, pidns, token: 'test-holder' });
 }
 
 /** A pid that is guaranteed not to be alive: a child that has already exited. */
