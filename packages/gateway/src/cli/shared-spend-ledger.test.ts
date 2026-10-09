@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
 import {
   existsSync,
+  readlinkSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -43,7 +44,16 @@ const onDisk = (): Record<string, { spent: number; cap: number }> =>
   JSON.parse(readFileSync(spendFile(), 'utf8')) as Record<string, { spent: number; cap: number }>;
 
 /** What a lock file holds: who took it, and from which host and pid namespace. */
-function lockRecord(pid: number, host: string = hostname(), pidns: string | null = null): string {
+/** The pid namespace a lock records for this process: a real value on Linux, none elsewhere. */
+const ownNamespace = (): string | null => {
+  try {
+    return readlinkSync('/proc/self/ns/pid');
+  } catch {
+    return null;
+  }
+};
+
+function lockRecord(pid: number, host: string = hostname(), pidns: string | null = ownNamespace()): string {
   return JSON.stringify({ pid, host, pidns, token: 'test-holder' });
 }
 
