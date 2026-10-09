@@ -22,7 +22,7 @@ import {
   utimesSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { hostname, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadSpendLedger } from './state.js';
 import { SharedSpendLedger } from './shared-spend-ledger.js';
@@ -41,6 +41,11 @@ const spendFile = () => join(dir, 'spend.json');
 const lockFile = () => join(dir, 'spend.lock');
 const onDisk = (): Record<string, { spent: number; cap: number }> =>
   JSON.parse(readFileSync(spendFile(), 'utf8')) as Record<string, { spent: number; cap: number }>;
+
+/** What a lock file holds: who took it, and from which host and pid namespace. */
+function lockRecord(pid: number, host: string = hostname(), pidns: string | null = null): string {
+  return JSON.stringify({ pid, host, pidns });
+}
 
 /** A pid that is guaranteed not to be alive: a child that has already exited. */
 function deadPid(): number {
@@ -101,11 +106,64 @@ describe('one cap across processes', () => {
   });
 });
 
+describe('what may be charged', () => {
+  // The amount comes from a tool argument the client chose. A negative charge is a refund: it
+  // lowers recorded spend, so it would reopen the headroom the cap exists to close.
+  it('refuses a negative charge, so spend cannot be refunded below what was recorded', () => {
+    const a = new SharedSpendLedger(dir);
+    a.setCap('L', 100);
+    expect(a.accrue('L', 100)).toBe(true);
+
+    expect(a.accrue('L', -100)).toBe(false);
+
+    expect(onDisk()['L']?.spent).toBe(100);
+    expect(a.accrue('L', 1)).toBe(false); // still at the cap
+  });
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['a fraction', 0.5],
+    ['beyond the safe integers', Number.MAX_SAFE_INTEGER + 2],
+  ])('refuses %s and records nothing', (_name, amount) => {
+    const a = new SharedSpendLedger(dir);
+    a.setCap('L', 100);
+
+    expect(a.accrue('L', amount)).toBe(false);
+
+    expect(onDisk()['L']?.spent).toBe(0);
+    expect(() => JSON.parse(readFileSync(spendFile(), 'utf8'))).not.toThrow(); // and the file is still valid
+  });
+
+  it('allows a zero charge, which changes nothing', () => {
+    const a = new SharedSpendLedger(dir);
+    a.setCap('L', 100);
+    expect(a.accrue('L', 0)).toBe(true);
+    expect(onDisk()['L']?.spent).toBe(0);
+  });
+
+  it.each([
+    ['a lease id that is an inherited property name', 'constructor'],
+    ['a lease id of __proto__', '__proto__'],
+  ])('does not find a cap through %s', (_name, id) => {
+    const a = new SharedSpendLedger(dir);
+    try {
+      expect(() => a.accrue(id, 1)).toThrow(/no cap registered/);
+      expect(({} as Record<string, unknown>)['spent']).toBeUndefined(); // Object.prototype untouched
+    } finally {
+      delete (Object.prototype as Record<string, unknown>)['spent'];
+    }
+  });
+});
+
 describe('an unreadable spend.json is refused, never read as zero spend', () => {
   it.each([
     ['not JSON', '{not json'],
     ['not an object', '[1,2,3]'],
     ['a malformed entry', '{"L":{"spent":"lots","cap":100}}'],
+    ['negative recorded spend', '{"L":{"spent":-1000,"cap":100}}'],
+    ['a negative cap', '{"L":{"spent":0,"cap":-1}}'],
+    ['a fractional spend', '{"L":{"spent":0.5,"cap":100}}'],
   ])('%s', (_name, contents) => {
     const a = new SharedSpendLedger(dir);
     writeFileSync(spendFile(), contents);
@@ -132,7 +190,7 @@ describe('the cross-process lock', () => {
   it('fails closed while a live process holds it, recording nothing', () => {
     const a = new SharedSpendLedger(dir, { lockTimeoutMs: 150 });
     a.setCap('L', 100);
-    writeFileSync(lockFile(), String(process.pid)); // held by a live process (this one)
+    writeFileSync(lockFile(), lockRecord(process.pid)); // held by a live process (this one)
 
     expect(a.accrue('L', 10)).toBe(false);
     expect(onDisk()['L']?.spent).toBe(0);
@@ -144,7 +202,7 @@ describe('the cross-process lock', () => {
   it('steals a lock left behind by a process that is no longer running', () => {
     const a = new SharedSpendLedger(dir, { lockTimeoutMs: 500 });
     a.setCap('L', 100);
-    writeFileSync(lockFile(), String(deadPid()));
+    writeFileSync(lockFile(), lockRecord(deadPid()));
 
     expect(a.accrue('L', 10)).toBe(true);
     expect(onDisk()['L']?.spent).toBe(10);
@@ -153,11 +211,49 @@ describe('the cross-process lock', () => {
   it('steals a lock that is held by a live pid but has not been touched for staleLockMs', () => {
     const a = new SharedSpendLedger(dir, { lockTimeoutMs: 500, staleLockMs: 1_000 });
     a.setCap('L', 100);
-    writeFileSync(lockFile(), String(process.pid));
+    writeFileSync(lockFile(), lockRecord(process.pid));
     const old = new Date(Date.now() - 60_000);
     utimesSync(lockFile(), old, old);
 
     expect(a.accrue('L', 10)).toBe(true);
+  });
+
+  // The pid in a lock is only meaningful where it was written. On another host, or in another pid
+  // namespace sharing the directory through a volume, a live holder's pid looks dead from here, and
+  // trusting that would steal the lock from a process that is mid-transaction.
+  it('does not steal on pid liveness alone from a holder on another host', () => {
+    const a = new SharedSpendLedger(dir, { lockTimeoutMs: 150 });
+    a.setCap('L', 100);
+    writeFileSync(lockFile(), lockRecord(deadPid(), 'some-other-host'));
+
+    expect(a.accrue('L', 10)).toBe(false); // fails closed; the holder may well be alive
+    expect(onDisk()['L']?.spent).toBe(0);
+  });
+
+  it('does not steal on pid liveness alone from a holder in another pid namespace', () => {
+    const a = new SharedSpendLedger(dir, { lockTimeoutMs: 150 });
+    a.setCap('L', 100);
+    writeFileSync(lockFile(), lockRecord(deadPid(), hostname(), 'pid:[4026539999]'));
+
+    expect(a.accrue('L', 10)).toBe(false);
+  });
+
+  it('still expires a foreign holder by age, so a crashed remote holder cannot wedge it forever', () => {
+    const a = new SharedSpendLedger(dir, { lockTimeoutMs: 500, staleLockMs: 1_000 });
+    a.setCap('L', 100);
+    writeFileSync(lockFile(), lockRecord(deadPid(), 'some-other-host'));
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lockFile(), old, old);
+
+    expect(a.accrue('L', 10)).toBe(true);
+  });
+
+  it('treats a lock it cannot parse as held until it is old, not as abandoned', () => {
+    const a = new SharedSpendLedger(dir, { lockTimeoutMs: 150 });
+    a.setCap('L', 100);
+    writeFileSync(lockFile(), ''); // a holder between creating the file and writing its record
+
+    expect(a.accrue('L', 10)).toBe(false);
   });
 
   it('releases the lock after every operation and leaves no temp files', () => {

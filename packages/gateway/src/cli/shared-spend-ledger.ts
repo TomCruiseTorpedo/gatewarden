@@ -32,85 +32,72 @@
  * the day it adopts `checkAndReserve`, they throw. Supporting holds means
  * persisting them under this lock.
  *
- * LOCK RESIDUAL. A lock is stolen when its holder is no longer running or it has
- * not been touched for `staleLockMs`. Two waiters stealing the same stale lock at
- * the same instant can both proceed; that needs a crashed holder AND a
- * simultaneous pair of waiters, and is not closed here.
+ * THE LOCK (and what it does not cover) is in `file-lock.ts`.
+ *
+ * INPUT. The amount comes from a tool argument the client chose, so it is not
+ * trusted: a negative charge would be a refund (it lowers recorded spend and
+ * reopens the headroom the cap exists to close). Charges must be non-negative
+ * safe integers; anything else is refused. The same holds for the file: negative,
+ * fractional or non-numeric spend or cap is treated as corruption, not as data.
+ * Lease ids are looked up in a prototype-less map, so an id such as
+ * `constructor` or `__proto__` can never resolve to an inherited property.
  *
  * It extends `InMemorySpendLedger` only because `LeaseEnforcer` is typed to that
  * class; every method the enforcer uses is overridden and none of the parent's
  * in-memory state is read.
  */
 
-import {
-  closeSync,
-  existsSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  renameSync,
-  statSync,
-  unlinkSync,
-  writeFileSync,
-  writeSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { InMemorySpendLedger } from '@gatewarden/govern';
 import type { SettleOutcome } from '@gatewarden/govern';
+import { acquireFileLock, FileLockTimeout } from './file-lock.js';
 
 interface SpendEntry {
   spent: number;
   cap: number;
 }
+/** Prototype-less, so no lease id can collide with an inherited property. */
 type SpendFile = Record<string, SpendEntry>;
 
 export interface SharedSpendLedgerOptions {
   /** How long to wait for the lock before refusing the charge. Default 5s. */
   lockTimeoutMs?: number;
-  /** A lock untouched for this long is treated as abandoned. Default 10s. */
+  /** A lock untouched for this long is abandoned. Default 10s. */
   staleLockMs?: number;
 }
-
-const DEFAULT_LOCK_TIMEOUT_MS = 5_000;
-const DEFAULT_STALE_LOCK_MS = 10_000;
 
 const NO_HOLDS =
   'SharedSpendLedger: reservations are not supported across processes. A hold lives in one ' +
   'process\'s memory, so two gateways could each hold the full cap. Charge with check()/accrue(), ' +
   'or persist holds under the lock before using checkAndReserve.';
 
-class SpendLockTimeout extends Error {}
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function isAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (err) {
-    return (err as NodeJS.ErrnoException).code === 'EPERM'; // exists, not ours to signal
-  }
+/** A non-negative integer that can be added without losing precision. */
+function isMinorUnits(n: unknown): n is number {
+  return typeof n === 'number' && Number.isSafeInteger(n) && n >= 0;
 }
 
 export class SharedSpendLedger extends InMemorySpendLedger {
   private readonly spendPath: string;
   private readonly lockPath: string;
-  private readonly lockTimeoutMs: number;
-  private readonly staleLockMs: number;
+  private readonly lockOpts: { timeoutMs?: number; staleMs?: number };
 
   constructor(stateDir: string, opts: SharedSpendLedgerOptions = {}) {
     super();
     mkdirSync(stateDir, { recursive: true });
     this.spendPath = join(stateDir, 'spend.json');
     this.lockPath = join(stateDir, 'spend.lock');
-    this.lockTimeoutMs = opts.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
-    this.staleLockMs = opts.staleLockMs ?? DEFAULT_STALE_LOCK_MS;
+    this.lockOpts = {
+      ...(opts.lockTimeoutMs !== undefined ? { timeoutMs: opts.lockTimeoutMs } : {}),
+      ...(opts.staleLockMs !== undefined ? { staleMs: opts.staleLockMs } : {}),
+    };
   }
 
   /** Register (or update) the cap for a lease. Throws if the lock cannot be taken. */
   override setCap(leaseId: string, capMinor: number): void {
+    if (!isMinorUnits(capMinor)) {
+      throw new Error(`SpendLedger: cap for lease "${leaseId}" must be a non-negative integer, got ${String(capMinor)}`);
+    }
     this.transact((entries) => {
       const existing = entries[leaseId];
       if (existing === undefined) {
@@ -127,11 +114,15 @@ export class SharedSpendLedger extends InMemorySpendLedger {
    * Charge immediately and irreversibly, against the spend on disk now.
    *
    * @returns `true` if within the cap (at the cap is allowed) and recorded;
-   *   `false` if it would breach the cap, OR if the lock could not be taken in
-   *   time (nothing is recorded either way).
+   *   `false` if it would breach the cap, if the amount is not a non-negative
+   *   safe integer, OR if the lock could not be taken in time. Nothing is
+   *   recorded in any `false` case.
    * @throws if no cap is registered for the lease, or `spend.json` is unreadable.
    */
   override accrue(leaseId: string, amountMinor: number, _nowMs?: number): boolean {
+    // Checked before anything else: a negative amount would LOWER recorded spend.
+    if (!isMinorUnits(amountMinor)) return false;
+
     let allowed = false;
     try {
       this.transact((entries) => {
@@ -148,7 +139,7 @@ export class SharedSpendLedger extends InMemorySpendLedger {
         return true;
       });
     } catch (err) {
-      if (err instanceof SpendLockTimeout) {
+      if (err instanceof FileLockTimeout) {
         process.stderr.write(`gatewarden: spend ledger busy, charge refused: ${err.message}\n`);
         return false;
       }
@@ -184,22 +175,23 @@ export class SharedSpendLedger extends InMemorySpendLedger {
   }
 
   // -------------------------------------------------------------------------
-  // Transaction + lock
+  // Transaction
   // -------------------------------------------------------------------------
 
   /** Run `fn` on the file's current contents under the lock; write back if it returns true. */
   private transact(fn: (entries: SpendFile) => boolean): void {
-    this.lockAcquire();
+    const release = acquireFileLock(this.lockPath, this.lockOpts);
     try {
       const entries = this.read();
       if (fn(entries)) this.write(entries);
     } finally {
-      this.lockRelease();
+      release();
     }
   }
 
   private read(): SpendFile {
-    if (!existsSync(this.spendPath)) return {};
+    const entries: SpendFile = Object.create(null) as SpendFile;
+    if (!existsSync(this.spendPath)) return entries;
     let parsed: unknown;
     try {
       parsed = JSON.parse(readFileSync(this.spendPath, 'utf8'));
@@ -211,66 +203,17 @@ export class SharedSpendLedger extends InMemorySpendLedger {
     }
     for (const [id, e] of Object.entries(parsed)) {
       const entry = e as Partial<SpendEntry> | null;
-      if (typeof entry?.spent !== 'number' || typeof entry.cap !== 'number') {
+      if (!isMinorUnits(entry?.spent) || !isMinorUnits(entry?.cap)) {
         throw new Error(`SpendLedger: ${this.spendPath} has a malformed entry for "${id}"; refusing to treat it as zero spend`);
       }
+      entries[id] = { spent: entry.spent, cap: entry.cap };
     }
-    return parsed as SpendFile;
+    return entries;
   }
 
   private write(entries: SpendFile): void {
     const tmp = `${this.spendPath}.${process.pid}.tmp`;
     writeFileSync(tmp, JSON.stringify(entries, null, 2));
     renameSync(tmp, this.spendPath);
-  }
-
-  private lockAcquire(): void {
-    const deadline = Date.now() + this.lockTimeoutMs;
-    for (;;) {
-      try {
-        const fd = openSync(this.lockPath, 'wx');
-        writeSync(fd, String(process.pid));
-        closeSync(fd);
-        return;
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
-      }
-      if (this.lockIsAbandoned()) {
-        try {
-          unlinkSync(this.lockPath);
-        } catch {
-          /* someone else removed it first */
-        }
-        continue;
-      }
-      if (Date.now() >= deadline) {
-        throw new SpendLockTimeout(`could not take ${this.lockPath} within ${this.lockTimeoutMs}ms`);
-      }
-      sleepSync(10);
-    }
-  }
-
-  /** True if the lock's holder has exited, or it has not been touched for `staleLockMs`. */
-  private lockIsAbandoned(): boolean {
-    let ageMs: number;
-    let pid: number;
-    try {
-      ageMs = Date.now() - statSync(this.lockPath).mtimeMs;
-      pid = Number(readFileSync(this.lockPath, 'utf8'));
-    } catch {
-      return false; // vanished between the failed create and now; just retry
-    }
-    if (ageMs >= this.staleLockMs) return true;
-    // An empty or partial file is a holder between open and write: not abandoned.
-    return Number.isInteger(pid) && pid > 0 && !isAlive(pid);
-  }
-
-  private lockRelease(): void {
-    try {
-      // Only remove a lock that is still ours; if it was stolen as stale, leave the new holder's.
-      if (Number(readFileSync(this.lockPath, 'utf8')) === process.pid) unlinkSync(this.lockPath);
-    } catch {
-      /* already gone */
-    }
   }
 }
