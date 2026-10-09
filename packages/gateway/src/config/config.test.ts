@@ -14,6 +14,8 @@ import { tmpdir } from 'node:os';
 
 import { loadConfig, ConfigLoadError, wireGovern } from './index.js';
 import type { GatewayConfig } from '../contract/index.js';
+import { loadState, saveState, savePolicyRules } from '../cli/state.js';
+import { wireComponents } from '../cli/wire.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -295,5 +297,98 @@ describe('wireGovern', () => {
     });
     // Unmapped tool → undefined (passthrough)
     expect(resolver('unlisted_tool', {})).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// wireGovern with persisted CLI state
+// ---------------------------------------------------------------------------
+
+/**
+ * `gatewarden request` mints leases with the key held in the state directory,
+ * and `gatewarden revoke` records revocations there. A `serve` process that
+ * wires itself with `wireGovern(config)` alone signs and verifies with a fresh
+ * random key, so no lease the CLI ever issued could verify in it: every one was
+ * denied with a signature failure. Passing the loaded state makes the serving
+ * enforcer the same authority the CLI is.
+ *
+ * Each `loadState(dir)` below is a separate load from disk, standing in for the
+ * separate OS process that `gatewarden request` and `gatewarden serve` are.
+ */
+describe('wireGovern with persisted CLI state', () => {
+  const READ_DATA_RULE = {
+    ruleId: 'allow-data-reads',
+    effect: 'allow' as const,
+    capabilityKind: 'fs.read' as const,
+    paths: ['/data/**'],
+  };
+
+  /** Mint a lease the way `gatewarden request` does: from state loaded off disk. */
+  async function mintViaCli(stateDir: string): Promise<{ token: string; leaseId: string }> {
+    savePolicyRules(stateDir, [READ_DATA_RULE]);
+    const state = loadState(stateDir);
+    const { broker } = wireComponents(state);
+    const result = await broker.request({
+      agentId: 'cli-agent',
+      taskId: 'cli-task',
+      capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }],
+      requestedDurationMs: 60_000,
+    });
+    if (result.type !== 'granted') throw new Error(`could not mint: ${JSON.stringify(result)}`);
+    saveState(state);
+    return { token: result.token, leaseId: result.lease.id };
+  }
+
+  it('a lease minted by the CLI verifies in a serve-wired enforcer', async () => {
+    const { token } = await mintViaCli(tmpDir);
+
+    const bundle = wireGovern(VALID_CONFIG, loadState(tmpDir));
+
+    expect(bundle.enforcer.check(token, { kind: 'fs.read', path: '/data/a.txt' }).ok).toBe(true);
+    // Sharing the key must not widen the lease.
+    const outOfScope = bundle.enforcer.check(token, { kind: 'fs.read', path: '/etc/shadow' });
+    expect(outOfScope.ok).toBe(false);
+    expect((outOfScope as { ok: false; reason: string }).reason).toContain(
+      'not permitted by the lease scope',
+    );
+  });
+
+  it('control: without state, the same CLI-minted lease is denied as a signature failure', async () => {
+    // Proves the test above can fail: a bundle wired the old way, from the same
+    // token, is a different authority and must reject it.
+    const { token } = await mintViaCli(tmpDir);
+
+    const bundle = wireGovern(VALID_CONFIG);
+
+    const result = bundle.enforcer.check(token, { kind: 'fs.read', path: '/data/a.txt' });
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; reason: string }).reason).toContain('signature verification failed');
+  });
+
+  it('a lease revoked through the CLI state is denied by the serve-wired enforcer', async () => {
+    // The shared key makes CLI leases verify, so the shared revocation list is
+    // what keeps `gatewarden revoke` meaningful for a running gateway.
+    const { token, leaseId } = await mintViaCli(tmpDir);
+
+    const revoker = loadState(tmpDir);
+    revoker.revocationList.revoke(leaseId);
+    saveState(revoker);
+
+    const bundle = wireGovern(VALID_CONFIG, loadState(tmpDir));
+
+    const result = bundle.enforcer.check(token, { kind: 'fs.read', path: '/data/a.txt' });
+    expect(result.ok).toBe(false);
+    expect((result as { ok: false; reason: string }).reason).toMatch(/revoked/i);
+  });
+
+  it('adopts the supplied state components rather than creating fresh ones', () => {
+    const state = loadState(tmpDir);
+
+    const bundle = wireGovern(VALID_CONFIG, state);
+
+    expect(bundle.audit).toBe(state.auditSink);
+    expect(bundle.revocationList).toBe(state.revocationList);
+    expect(bundle.spendLedger).toBe(state.spendLedger);
+    expect(bundle.pendingStore).toBe(state.pendingStore);
   });
 });

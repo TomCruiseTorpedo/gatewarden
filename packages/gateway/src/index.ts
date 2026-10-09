@@ -49,7 +49,7 @@ export {
 // ── Config (gateway-002) ──────────────────────────────────────────────────
 
 export { loadConfig, ConfigLoadError } from './config/index.js';
-export type { ConfigLoadErrorCode, GovernBundle } from './config/index.js';
+export type { ConfigLoadErrorCode, GovernBundle, GovernState } from './config/index.js';
 
 export { wireGovern } from './config/index.js';
 

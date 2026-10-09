@@ -49,6 +49,13 @@ Starts an MCP server on stdio. Clients must supply a signed lease token in
 `_meta['x-lease-token']` at the `initialize` handshake. Unmapped tools pass
 through; mapped tools are enforced by the lease.
 
+`serve` takes its signing key, revocations, spend ledger and audit log from the
+state directory (`--state-dir`, `GATEWARDEN_STATE_DIR`, or `.gatewarden/`), the
+same one `gatewarden request` and `gatewarden revoke` use, so a lease minted by
+`request` verifies in `serve` and a revoked one is refused. A first run creates
+the key in that directory; keep it private. Programmatic use (below) wires its
+own key per `wireGovern(config)` call unless you pass it persisted state.
+
 ### 4. Use programmatically
 
 ```ts

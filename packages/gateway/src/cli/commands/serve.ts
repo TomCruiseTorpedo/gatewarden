@@ -1,8 +1,14 @@
 /**
  * `gatewarden serve <config>` — start the gateway proxy.
  *
- * Loads the gateway config, wires the govern runtime, creates a
- * GatewardenProxy, and starts serving on stdio.
+ * Loads the gateway config, wires the govern runtime from the persisted CLI
+ * state, creates a GatewardenProxy, and starts serving on stdio.
+ *
+ * The signing key, revocation list, spend ledger and audit log come from the
+ * state directory (`--state-dir`, `GATEWARDEN_STATE_DIR`, or `.gatewarden/`),
+ * the same place `gatewarden request` and `gatewarden revoke` write. That is
+ * what lets a lease minted by `request` verify here and a revoked one be
+ * refused. The state is saved again on SIGINT/SIGTERM.
  *
  * The proxy server reads from stdin / writes to stdout (StdioServerTransport).
  * The downstream MCP server is spawned as a subprocess (StdioClientTransport).
@@ -16,6 +22,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { loadConfig } from '../../config/index.js';
 import { wireGovern } from '../../config/index.js';
 import { GatewardenProxy } from '../../proxy/index.js';
+import { loadState, resolveStateDir, saveState } from '../state.js';
 import type { StdioDownstreamSpec } from '../../contract/index.js';
 import { EgressLog, processTree, sampleEgress } from '../../egress/observer.js';
 import { computeEgressParity, describeCoverage, renderEgressParity } from '../../egress/parity.js';
@@ -47,6 +54,8 @@ function collectDeclaredEndpoints(config: unknown): string[] {
 
 export interface ServeOptions {
   configPath: string;
+  /** State directory holding the signing key and stores. Defaults per `resolveStateDir`. */
+  stateDir?: string;
 }
 
 export async function cmdServe(opts: ServeOptions): Promise<void> {
@@ -60,7 +69,11 @@ export async function cmdServe(opts: ServeOptions): Promise<void> {
   }
 
   const spec = config.downstream as StdioDownstreamSpec;
-  const bundle = wireGovern(config);
+  // Wire from the persisted state, not a fresh in-memory runtime: a fresh one
+  // generates its own signing key, so no lease `gatewarden request` ever issued
+  // could verify here.
+  const state = loadState(resolveStateDir(opts.stateDir));
+  const bundle = wireGovern(config, state);
   const proxy = new GatewardenProxy(bundle);
 
   const clientTransport = new StdioServerTransport();
@@ -113,6 +126,8 @@ export async function cmdServe(opts: ServeOptions): Promise<void> {
         ),
       ) + '\n',
     );
+    // Persist the session's audit events and any spend recorded against leases.
+    saveState(state);
     proxy.close().catch(() => {
       /* ignore */
     });

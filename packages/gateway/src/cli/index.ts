@@ -149,14 +149,17 @@ EXAMPLE
 gatewarden serve <config> — start the gateway proxy
 
 USAGE
-  gatewarden serve <config-path>
+  gatewarden serve <config-path> [--state-dir <path>]
 
 ARGUMENTS
   <config-path>   Path to a GatewayConfig JSON or JS file
 
 DESCRIPTION
-  Wires the govern runtime from the config (policy, signer, broker, enforcer)
-  and starts an enforcing MCP proxy on stdio fronting the downstream server.
+  Starts an enforcing MCP proxy on stdio fronting the downstream server.
+  The signing key, revocations, spend ledger and audit log come from the state
+  directory (default .gatewarden/), the same one 'gatewarden request' and
+  'gatewarden revoke' use. A lease minted by 'request' therefore verifies here,
+  and a revoked one is refused. The state is saved on SIGINT/SIGTERM.
 
 EXAMPLE
   gatewarden serve ./gateway.config.json
@@ -485,7 +488,7 @@ async function main(): Promise<void> {
         console.error('Error: serve requires a <config-path> argument');
         process.exit(1);
       }
-      await cmdServe({ configPath });
+      await cmdServe({ configPath, stateDir: resolvedStateDir });
       break;
     }
 
