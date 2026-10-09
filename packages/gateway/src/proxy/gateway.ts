@@ -13,7 +13,7 @@
  *   - Expose `getSnapshot()` and `rescore()`.
  *
  * Enforcement model (mirrors LeasebrokerProxy from govern):
- *   - `initialize`: capture `_meta['x-lease-token']` → sessionId binding.
+ *   - `initialize`: capture `_meta['x-lease-token']` → per-connection binding.
  *   - `tools/list`: delegate to downstream.
  *   - `tools/call`:
  *       - Resolve tool → Action via bundle.resolver.
@@ -45,6 +45,23 @@ import type { ScoringOptions } from '../scoring/index.js';
 // GatewardenProxy
 // ---------------------------------------------------------------------------
 
+/**
+ * Binding key for a connection whose transport carries no session identity.
+ *
+ * `extra.sessionId` comes from `transport.sessionId`, and only some transports
+ * set one: streamable HTTP does in stateful mode, but STDIO never does, nor
+ * does streamable HTTP in stateless mode (`sessionIdGenerator: undefined`).
+ * Keying the lease binding on `sessionId` alone therefore denied every mapped
+ * tool call over stdio — the token was filed under `undefined` at the handshake
+ * and never found again.
+ *
+ * Binding those connections under a shared key is sound because an SDK `Server`
+ * accepts exactly one transport at a time ("use a separate Protocol instance
+ * per connection" — Protocol.connect), so one proxy instance is always exactly
+ * one client session. The NUL cannot collide with a real transport sessionId.
+ */
+const SINGLE_CONNECTION_KEY = '\u0000single-connection';
+
 export class GatewardenProxy {
   /** Enforcing MCP server — what clients connect to. */
   private readonly server: Server;
@@ -56,8 +73,10 @@ export class GatewardenProxy {
   private readonly downstreamClient: Client;
 
   /**
-   * Session token map: transport-level sessionId → lease token.
-   * Populated at the `initialize` handshake.
+   * Session token map: binding key → lease token, set at the `initialize`
+   * handshake. The key is the transport-level sessionId when the transport
+   * supplies one, and SINGLE_CONNECTION_KEY when it does not — see that
+   * constant for why a shared key is safe here.
    */
   private readonly sessionTokens = new Map<string, string>();
 
@@ -94,8 +113,14 @@ export class GatewardenProxy {
       const rawMeta = request.params._meta as Record<string, unknown> | undefined;
       const token = rawMeta?.['x-lease-token'];
 
-      if (typeof token === 'string' && extra.sessionId !== undefined) {
-        this.sessionTokens.set(extra.sessionId, token);
+      // The handshake is authoritative for this connection's binding. A client
+      // that presents no token must not inherit one left behind by an earlier
+      // connection on a reused proxy instance, so the absent case CLEARS.
+      const bindingKey = extra.sessionId ?? SINGLE_CONNECTION_KEY;
+      if (typeof token === 'string') {
+        this.sessionTokens.set(bindingKey, token);
+      } else {
+        this.sessionTokens.delete(bindingKey);
       }
 
       // Protocol version negotiation (mirrors SDK's own logic).
@@ -135,9 +160,7 @@ export class GatewardenProxy {
       }
 
       // Look up the lease token for this session.
-      const sessionId = extra.sessionId;
-      const token =
-        sessionId !== undefined ? this.sessionTokens.get(sessionId) : undefined;
+      const token = this.sessionTokens.get(extra.sessionId ?? SINGLE_CONNECTION_KEY);
 
       if (token === undefined) {
         // No token at all — deny and audit (R4).
