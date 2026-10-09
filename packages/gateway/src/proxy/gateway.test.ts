@@ -638,6 +638,136 @@ describe('GatewardenProxy', () => {
       expect(events.some((e) => e.type === 'denial')).toBe(true);
     });
 
+    // ── Audit attribution — every event names the lease it acted under ───────
+    //
+    // Regression: these events were once appended with no `leaseId` at all.
+    // Under stdio one process was roughly one agent was roughly one lease, so
+    // the field was recoverable from deployment context — but that stops being
+    // true the moment one proxy serves many leases, and the hash chain seals an
+    // unattributable record just as faithfully as an attributable one.
+    it('attributes a use event to the lease id from the VERIFIED lease', async () => {
+      await proxy.attach(proxyServerTransport, proxyClientTransport);
+
+      const lease = makeLease({
+        id: 'lease-attribution-use',
+        taskId: 'task-attribution-use',
+        capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }],
+      });
+      const token = signer.issue(lease);
+
+      await initSession(clientTransport, token);
+      await sendAndWait(clientTransport, {
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'read_file', arguments: { path: '/data/file.txt' } },
+      });
+
+      const useEvent = audit.read().find((e) => e.type === 'use');
+      expect(useEvent).toBeDefined();
+      expect(useEvent?.leaseId).toBe('lease-attribution-use');
+      expect(useEvent?.detail['taskId']).toBe('task-attribution-use');
+    });
+
+    it('attributes a scope denial to the lease id — the token verified, it just did not authorize', async () => {
+      await proxy.attach(proxyServerTransport, proxyClientTransport);
+
+      const lease = makeLease({
+        id: 'lease-attribution-denial',
+        taskId: 'task-attribution-denial',
+        capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }],
+      });
+      const token = signer.issue(lease);
+
+      await initSession(clientTransport, token);
+      await sendAndWait(clientTransport, {
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'read_file', arguments: { path: '/secrets/key.pem' } },
+      });
+
+      const denial = audit.read().find((e) => e.type === 'denial');
+      expect(denial).toBeDefined();
+      expect(denial?.leaseId).toBe('lease-attribution-denial');
+      expect(denial?.detail['taskId']).toBe('task-attribution-denial');
+    });
+
+    it('records NO leaseId when the token fails signature verification', async () => {
+      await proxy.attach(proxyServerTransport, proxyClientTransport);
+
+      // A token signed by a DIFFERENT key: its claims decode, but no signature
+      // in this proxy's keyring backs them. Attributing the denial to the id
+      // inside it would let a forger write any lease id into the audit log.
+      const foreignSigner = new PasetoV4PublicSigner(generateKeyPair('k1'));
+      const forged = foreignSigner.issue(
+        makeLease({
+          id: 'lease-forged-not-ours',
+          capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }],
+        }),
+      );
+
+      await initSession(clientTransport, forged);
+      await sendAndWait(clientTransport, {
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'read_file', arguments: { path: '/data/file.txt' } },
+      });
+
+      const denial = audit.read().find((e) => e.type === 'denial');
+      expect(denial).toBeDefined();
+      // Unattributed, and specifically NOT attributed to the forged id.
+      expect(denial?.leaseId).toBeUndefined();
+      expect(JSON.stringify(denial)).not.toContain('lease-forged-not-ours');
+    });
+
+    // ── Ungoverned calls are counted, not invisible ──────────────────────────
+    //
+    // Regression: an unmapped tool was forwarded with NO audit event at all, so
+    // an operator reading the log saw only governed traffic and could infer
+    // there had been no other kind.
+    it('emits a passthrough event for an unmapped tool, and still forwards it', async () => {
+      await proxy.attach(proxyServerTransport, proxyClientTransport);
+
+      const token = signer.issue(makeLease({ capabilities: [] }));
+      downstreamResponses.set('list_directory', {
+        content: [{ type: 'text', text: 'file1.txt, file2.txt' }],
+      });
+
+      await initSession(clientTransport, token);
+      const response = await sendAndWait(clientTransport, {
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'list_directory', arguments: { path: '/data' } },
+      });
+
+      // Still forwarded — the passthrough event must not change behaviour.
+      const result = response['result'] as Record<string, unknown> | undefined;
+      expect(result?.['isError']).toBeFalsy();
+      const content = result?.['content'] as Array<{ text: string }> | undefined;
+      expect(content?.[0]?.text).toBe('file1.txt, file2.txt');
+
+      const passthroughs = audit.read().filter((e) => e.type === 'passthrough');
+      expect(passthroughs).toHaveLength(1);
+      expect(passthroughs[0]?.detail['toolName']).toBe('list_directory');
+      // Not folded into `use` — that would claim governance never performed.
+      expect(audit.read().some((e) => e.type === 'use')).toBe(false);
+    });
+
+    it('emits a passthrough event even with no session token at all', async () => {
+      await proxy.attach(proxyServerTransport, proxyClientTransport);
+
+      await initSession(clientTransport /* no token */);
+      await sendAndWait(clientTransport, {
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'list_directory', arguments: { path: '/data' } },
+      });
+
+      const passthroughs = audit.read().filter((e) => e.type === 'passthrough');
+      expect(passthroughs).toHaveLength(1);
+      // Nothing was verified, so there is nothing to attribute it to.
+      expect(passthroughs[0]?.leaseId).toBeUndefined();
+    });
+
     it('audit chain is intact across multiple events', async () => {
       await proxy.attach(proxyServerTransport, proxyClientTransport);
 
