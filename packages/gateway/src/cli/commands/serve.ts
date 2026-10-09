@@ -8,7 +8,9 @@
  * state directory (`--state-dir`, `GATEWARDEN_STATE_DIR`, or `.gatewarden/`),
  * the same place `gatewarden request` and `gatewarden revoke` write. That is
  * what lets a lease minted by `request` verify here and a revoked one be
- * refused. The state is saved again on SIGINT/SIGTERM.
+ * refused, including one revoked while this process is running. On
+ * SIGINT/SIGTERM only this session's own audit events and spend are merged
+ * back; nothing else in the directory is rewritten.
  *
  * The proxy server reads from stdin / writes to stdout (StdioServerTransport).
  * The downstream MCP server is spawned as a subprocess (StdioClientTransport).
@@ -22,7 +24,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { loadConfig } from '../../config/index.js';
 import { wireGovern } from '../../config/index.js';
 import { GatewardenProxy } from '../../proxy/index.js';
-import { loadState, resolveStateDir, saveState } from '../state.js';
+import { openServeSession, resolveStateDir } from '../state.js';
 import type { StdioDownstreamSpec } from '../../contract/index.js';
 import { EgressLog, processTree, sampleEgress } from '../../egress/observer.js';
 import { computeEgressParity, describeCoverage, renderEgressParity } from '../../egress/parity.js';
@@ -72,8 +74,18 @@ export async function cmdServe(opts: ServeOptions): Promise<void> {
   // Wire from the persisted state, not a fresh in-memory runtime: a fresh one
   // generates its own signing key, so no lease `gatewarden request` ever issued
   // could verify here.
-  const state = loadState(resolveStateDir(opts.stateDir));
-  const bundle = wireGovern(config, state);
+  const session = openServeSession(resolveStateDir(opts.stateDir));
+  // A long-running proxy persists its session's audit events at shutdown, and
+  // that save is refused on a tampered log, so the session's events would be
+  // lost. Fail closed at startup instead.
+  if (session.state.auditIntegrity === 'tampered') {
+    process.stderr.write(
+      'refusing to start: audit log fails stored hash-chain verification — possible tampering. ' +
+        'Archive the audit log manually to resume with a fresh chain.\n',
+    );
+    process.exit(1);
+  }
+  const bundle = wireGovern(config, session.state);
   const proxy = new GatewardenProxy(bundle);
 
   const clientTransport = new StdioServerTransport();
@@ -126,8 +138,16 @@ export async function cmdServe(opts: ServeOptions): Promise<void> {
         ),
       ) + '\n',
     );
-    // Persist the session's audit events and any spend recorded against leases.
-    saveState(state);
+    // Persist this session's audit events and spend. The session merges them
+    // onto what is on disk now rather than rewriting the state directory from
+    // the snapshot taken at startup, which would undo anything `request` and
+    // `revoke` did while this process was up. If the log was tampered with
+    // meanwhile the save refuses; say so rather than exit with events unsaved.
+    try {
+      session.save();
+    } catch (err) {
+      process.stderr.write(`gatewarden: ${(err as Error).message}\n`);
+    }
     proxy.close().catch(() => {
       /* ignore */
     });

@@ -49,12 +49,17 @@ Starts an MCP server on stdio. Clients must supply a signed lease token in
 `_meta['x-lease-token']` at the `initialize` handshake. Unmapped tools pass
 through; mapped tools are enforced by the lease.
 
-`serve` takes its signing key, revocations, spend ledger and audit log from the
-state directory (`--state-dir`, `GATEWARDEN_STATE_DIR`, or `.gatewarden/`), the
-same one `gatewarden request` and `gatewarden revoke` use, so a lease minted by
-`request` verifies in `serve` and a revoked one is refused. A first run creates
-the key in that directory; keep it private. Programmatic use (below) wires its
-own key per `wireGovern(config)` call unless you pass it persisted state.
+`serve` and `a2a-serve` take their signing key, revocations, spend ledger and
+audit log from the state directory (`--state-dir`, `GATEWARDEN_STATE_DIR`, or
+`.gatewarden/`), the same one `gatewarden request` and `gatewarden revoke` use.
+A lease minted by `request` therefore verifies in the running gateway, and a
+lease revoked from another process is refused on the very next call. A first run
+creates the key in that directory; keep it private. On shutdown the gateway
+merges only its own audit events and spend back, so it never undoes a `revoke`
+or drops events written meanwhile. It refuses to start on an audit log that fails
+stored hash-chain verification (`gatewarden audit --verify`). Programmatic use
+(below) wires its own key per `wireGovern(config)` call unless you pass it
+persisted state.
 
 ### 4. Use programmatically
 

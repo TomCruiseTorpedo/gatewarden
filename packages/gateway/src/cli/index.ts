@@ -78,6 +78,7 @@ A2A COMMANDS (ADR-H)
                           --out <dir> writes agent-card.json)
   a2a-serve <config>     Serve the governed tool surface as a live A2A agent
                          (--interface-url required; --port <n>, --host <h>;
+                          leases come from the state dir, like serve;
                           --signing-key <jwk> serves a SIGNED card + JWKS;
                           well-known card + JSON-RPC endpoint, lease-gated)
   a2a-keygen             Mint a card-signing key pair (--out <dir>;
@@ -159,7 +160,10 @@ DESCRIPTION
   The signing key, revocations, spend ledger and audit log come from the state
   directory (default .gatewarden/), the same one 'gatewarden request' and
   'gatewarden revoke' use. A lease minted by 'request' therefore verifies here,
-  and a revoked one is refused. The state is saved on SIGINT/SIGTERM.
+  and a revoked one is refused, including one revoked while serve is running.
+  On SIGINT/SIGTERM only this session's own audit events and spend are merged
+  back into the state directory; nothing else is rewritten. It refuses to start
+  on an audit log that fails stored hash-chain verification.
 
 EXAMPLE
   gatewarden serve ./gateway.config.json
@@ -454,6 +458,7 @@ async function main(): Promise<void> {
         ...(typeof values['signing-key'] === 'string'
           ? { signingKey: values['signing-key'] }
           : {}),
+        stateDir: resolvedStateDir,
       });
       break;
     }
