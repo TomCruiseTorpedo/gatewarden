@@ -180,16 +180,22 @@ export class SharedSpendLedger extends InMemorySpendLedger {
 
   /** Run `fn` on the file's current contents under the lock; write back if it returns true. */
   private transact(fn: (entries: SpendFile) => boolean): void {
-    const release = acquireFileLock(this.lockPath, this.lockOpts);
+    const lock = acquireFileLock(this.lockPath, this.lockOpts);
     try {
       const entries = this.read();
-      if (fn(entries)) this.write(entries);
+      if (fn(entries)) {
+        // Fence the commit: if the lock is no longer ours, another process may have changed the file
+        // since we read it, and writing would erase that. Refuse the charge instead.
+        if (!lock.isHeld()) throw new FileLockTimeout(`lost ${this.lockPath} before committing`);
+        this.write(entries);
+      }
     } finally {
-      release();
+      lock.release();
     }
   }
 
-  private read(): SpendFile {
+  /** Protected so a test can lose the lock mid-transaction. */
+  protected read(): SpendFile {
     const entries: SpendFile = Object.create(null) as SpendFile;
     if (!existsSync(this.spendPath)) return entries;
     let parsed: unknown;

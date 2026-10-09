@@ -186,6 +186,36 @@ describe('reservations are refused rather than silently kept per process', () =>
   });
 });
 
+describe('a charge is committed only while the lock is still held', () => {
+  // A lock can be lost mid-transaction (a holder on another host that aged out, a file removed by
+  // hand). Another process may then have changed spend.json since this one read it, and writing
+  // would erase that change. The commit is fenced: if the lock is no longer ours, the charge is
+  // refused and nothing is written.
+  class LosesTheLock extends SharedSpendLedger {
+    protected override read(): ReturnType<SharedSpendLedger['read']> {
+      const entries = super.read();
+      writeFileSync(lockFile(), lockRecord(process.pid, 'some-other-host')); // someone else holds it now
+      return entries;
+    }
+  }
+
+  it('refuses the charge and writes nothing if the lock was lost before the commit', () => {
+    new SharedSpendLedger(dir).setCap('L', 100); // registered normally
+    const a = new LosesTheLock(dir, { lockTimeoutMs: 200 });
+
+    expect(a.accrue('L', 10)).toBe(false);
+
+    expect(onDisk()['L']?.spent).toBe(0);
+  });
+
+  it("does not remove the new holder's lock on the way out", () => {
+    new SharedSpendLedger(dir).setCap('L', 100);
+    new LosesTheLock(dir, { lockTimeoutMs: 200 }).accrue('L', 10);
+
+    expect(existsSync(lockFile())).toBe(true); // theirs, still there
+  });
+});
+
 describe('the cross-process lock', () => {
   it('fails closed while a live process holds it, recording nothing', () => {
     const a = new SharedSpendLedger(dir, { lockTimeoutMs: 150 });
@@ -208,14 +238,17 @@ describe('the cross-process lock', () => {
     expect(onDisk()['L']?.spent).toBe(10);
   });
 
-  it('steals a lock that is held by a live pid but has not been touched for staleLockMs', () => {
-    const a = new SharedSpendLedger(dir, { lockTimeoutMs: 500, staleLockMs: 1_000 });
+  // Slow is not dead. Taking the lock from a living but stalled holder lets two processes charge at
+  // once, so a charge waits (and, failing that, is refused) rather than racing it.
+  it('does not take the lock from a holder that is alive on this host, however old the lock', () => {
+    const a = new SharedSpendLedger(dir, { lockTimeoutMs: 200, staleLockMs: 1_000 });
     a.setCap('L', 100);
     writeFileSync(lockFile(), lockRecord(process.pid));
     const old = new Date(Date.now() - 60_000);
     utimesSync(lockFile(), old, old);
 
-    expect(a.accrue('L', 10)).toBe(true);
+    expect(a.accrue('L', 10)).toBe(false); // refused, not raced
+    expect(onDisk()['L']?.spent).toBe(0);
   });
 
   // The pid in a lock is only meaningful where it was written. On another host, or in another pid
