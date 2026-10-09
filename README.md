@@ -78,14 +78,14 @@ and optionally enforces `spend` extracted from DataParts.
 
 ## Status
 
-**On `main`:** the full MCP gateway plus the A2A lane — 622 tests across the
-workspace (score 237, govern 240, gateway 145), typecheck and build green in
-all three packages, keyless demo green, CI green.
+**On `main`:** the full MCP gateway plus the A2A lane — 787 tests across the
+workspace (score 284, govern 326, gateway 177), typecheck and build green in
+all three packages, keyless demo green, CI green. Versioned **0.2.0**.
 
-**On npm:** `@gatewarden/score` / `@gatewarden/govern` / `@gatewarden/gateway`
-at **0.1.0**, which predates the A2A lane (attach, card generation/signing,
-the A2A server face, and the a2a-* commands are `main`-only until the next
-release). The private root workspace stays `0.0.0`.
+**On npm:** the last published release of `@gatewarden/score` / `@gatewarden/govern` /
+`@gatewarden/gateway` is **0.1.0**, which predates the A2A lane (attach, card
+generation/signing, the A2A server face, and the a2a-* commands are `main`-only
+until 0.2.0 is published). The private root workspace stays `0.0.0`.
 
 ## License
 
