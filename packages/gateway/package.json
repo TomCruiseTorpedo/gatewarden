@@ -1,6 +1,6 @@
 {
   "name": "@gatewarden/gateway",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "MCP Gateway \u2014 one in-path proxy that scores a downstream MCP server and governs every tool call with capability leases. Fuses @gatewarden/score and @gatewarden/govern.",
   "type": "module",
   "license": "Apache-2.0",
@@ -37,8 +37,8 @@
   },
   "dependencies": {
     "@a2a-js/sdk": "1.0.1",
-    "@gatewarden/govern": "0.1.0",
-    "@gatewarden/score": "0.1.0",
+    "@gatewarden/govern": "0.2.0",
+    "@gatewarden/score": "0.2.0",
     "@modelcontextprotocol/sdk": "^1.32.1",
     "minimatch": "^10.0.1",
     "zod": "^4.4.3"
