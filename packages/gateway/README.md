@@ -64,6 +64,17 @@ stored hash-chain verification (`gatewarden audit --verify`). Programmatic use
 (below) wires its own key per `wireGovern(config)` call unless you pass it
 persisted state.
 
+Commands that change state (`request`, `approve`, `deny`, `revoke`, `policy load`)
+run as one transaction under `state.lock` in the state directory, so concurrent
+commands queue instead of overwriting each other. Without that, each command saved
+the snapshot it had loaded over the others' changes: with 12 `revoke` and 12
+`request` run at once, about half the revocations and audit events were lost.
+Reads (`audit`, `pending`, `policy show`) do not wait; every write replaces its file
+atomically, so a reader sees a whole old file or a whole new one. If a command
+reports that another command is using the state directory, retry; if nothing is
+running, the lock is left over and can be removed. Keep the state directory on a
+local filesystem: the lock needs an atomic exclusive file create.
+
 `a2a-serve` fronts the same governed tools as an A2A agent over HTTP
 (`gatewarden a2a-serve ./gateway.config.json --interface-url <public url>`). By
 default it follows the A2A lease profile's context binding: the first message on
