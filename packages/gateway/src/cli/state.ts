@@ -21,6 +21,7 @@ import {
   parseStoredAuditJsonl,
 } from '@gatewarden/govern';
 import type { KeyPair } from '@gatewarden/govern';
+import { SharedSpendLedger } from './shared-spend-ledger.js';
 
 // ---------------------------------------------------------------------------
 // State directory resolution
@@ -232,18 +233,6 @@ export function loadSpendLedger(stateDir: string): InMemorySpendLedger {
   return ledger;
 }
 
-export function saveSpendLedger(stateDir: string, ledger: InMemorySpendLedger): void {
-  ensureDir(stateDir);
-  const internal = ledger as unknown as {
-    ledger: Map<string, { spent: number; cap: number }>;
-  };
-  const data: StoredSpend = {};
-  for (const [leaseId, entry] of internal.ledger.entries()) {
-    data[leaseId] = { spent: entry.spent, cap: entry.cap };
-  }
-  writeFileSync(join(stateDir, 'spend.json'), JSON.stringify(data, null, 2));
-}
-
 // ---------------------------------------------------------------------------
 // Combined state bundle
 // ---------------------------------------------------------------------------
@@ -283,6 +272,14 @@ export function loadState(stateDir: string): CliState {
   };
 }
 
+/**
+ * Persist the state a short-lived command changed.
+ *
+ * `spend.json` is deliberately NOT written here. No short-lived command charges
+ * spend, so its in-memory ledger is only the snapshot it loaded; writing that
+ * back would erase any spend a running gateway recorded in between, and with it
+ * the cap. `SharedSpendLedger` is the one writer of `spend.json`.
+ */
 export function saveState(state: CliState): void {
   if (state.auditIntegrity === 'tampered') {
     throw new AuditTamperError(
@@ -294,7 +291,6 @@ export function saveState(state: CliState): void {
   saveAuditSink(state.stateDir, state.auditSink);
   savePendingStore(state.stateDir, state.pendingStore);
   saveRevocationList(state.stateDir, state.revocationList);
-  saveSpendLedger(state.stateDir, state.spendLedger);
 }
 
 // ---------------------------------------------------------------------------
@@ -306,13 +302,6 @@ function writeFileAtomic(target: string, data: string): void {
   const tmp = `${target}.${process.pid}.tmp`;
   writeFileSync(tmp, data);
   renameSync(tmp, target);
-}
-
-type SpendEntries = Map<string, { spent: number; cap: number }>;
-
-/** The ledger's entries. The ledger exposes no iterator; the CLI already reaches in for persistence. */
-function spendEntries(ledger: InMemorySpendLedger): SpendEntries {
-  return (ledger as unknown as { ledger: SpendEntries }).ledger;
 }
 
 /**
@@ -356,10 +345,10 @@ export interface ServeSession {
   /** State to wire the proxy from. Its revocation list reads through to disk. */
   state: CliState;
   /**
-   * Persist what this session changed: its audit events and the spend it
-   * recorded, each merged onto what is on disk now. Idempotent. Throws
-   * {@link AuditTamperError}, writing nothing, if the audit log on disk fails
-   * stored-chain verification.
+   * Persist what this session changed: its audit events, merged onto the log
+   * as it is on disk now. Idempotent. Throws {@link AuditTamperError}, writing
+   * nothing, if the audit log on disk fails stored-chain verification. Spend is
+   * not saved here: it is written through to `spend.json` as it is charged.
    */
   save(): void;
 }
@@ -374,25 +363,23 @@ export interface ServeSession {
  * mid-session came back to life, and the audit events other processes wrote
  * (including the revocation record) were dropped.
  *
- * So a session owns only what it changes: its audit events, and the `spent`
- * amounts it accrues against spend-capped leases (caps are registered lazily by
- * the enforcer, so they need no persisting). It never mutates revocations or
- * pending requests, and never writes those files. If a gateway ever starts
- * changing something else, persist it here with merge semantics, not by
- * rewriting the file from a snapshot.
+ * So a session owns only what it changes. Its audit events are merged onto the
+ * log at shutdown. Spend cannot wait for shutdown: concurrent gateways must
+ * share one cap, so every charge goes through `SharedSpendLedger`, which checks
+ * and records it under a lock against `spend.json` as it is now. It never
+ * mutates revocations or pending requests, and never writes those files. If a
+ * gateway ever starts changing something else, persist it here with merge
+ * semantics, not by rewriting the file from a snapshot.
  */
 export function openServeSession(stateDir: string): ServeSession {
   const state = loadState(stateDir);
   state.revocationList = new DiskBackedRevocationList(join(stateDir, 'revoked.json'));
+  // Not the snapshot loadState read: every charge goes to spend.json under a lock,
+  // checked against what is on disk now, so concurrent gateways share one cap.
+  state.spendLedger = new SharedSpendLedger(stateDir);
 
   // Events present at load are already on disk. Everything after is this session's.
   let persistedEvents = state.auditSink.readVerbatim().length;
-  const spendAtOpen = (): Map<string, number> => {
-    const m = new Map<string, number>();
-    for (const [id, e] of spendEntries(state.spendLedger)) m.set(id, e.spent);
-    return m;
-  };
-  let persistedSpend = spendAtOpen();
 
   return {
     state,
@@ -419,28 +406,6 @@ export function openServeSession(stateDir: string): ServeSession {
             .join('\n') + '\n',
         );
         persistedEvents = state.auditSink.readVerbatim().length;
-      }
-
-      // ── spend ───────────────────────────────────────────────────────────
-      // Apply this session's increase per lease onto the ledger as it is on
-      // disk now, so spend another process recorded is added to, not replaced.
-      const deltas: Array<[string, number, number]> = [];
-      for (const [id, e] of spendEntries(state.spendLedger)) {
-        const delta = e.spent - (persistedSpend.get(id) ?? 0);
-        if (delta > 0) deltas.push([id, delta, e.cap]);
-      }
-      if (deltas.length > 0) {
-        const disk = loadSpendLedger(stateDir);
-        const diskEntries = spendEntries(disk);
-        for (const [id, delta, cap] of deltas) {
-          const entry = diskEntries.get(id);
-          if (entry === undefined) diskEntries.set(id, { spent: delta, cap });
-          else entry.spent += delta;
-        }
-        const data: StoredSpend = {};
-        for (const [id, e] of diskEntries) data[id] = { spent: e.spent, cap: e.cap };
-        writeFileAtomic(join(stateDir, 'spend.json'), JSON.stringify(data, null, 2));
-        persistedSpend = spendAtOpen();
       }
     },
   };

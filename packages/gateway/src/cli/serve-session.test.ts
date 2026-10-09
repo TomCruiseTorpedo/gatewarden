@@ -170,31 +170,60 @@ describe('serve session', () => {
 
     expect(owned.map((f) => readFileSync(join(dir, f), 'utf8'))).toEqual(before);
   });
+});
 
-  it('merges spend as a delta onto what is on disk, leaving other leases alone', () => {
-    // At session open: lease L has spent 10 of 100; lease M has spent 5 of 50.
-    writeFileSync(
-      join(dir, 'spend.json'),
-      JSON.stringify({ L: { spent: 10, cap: 100 }, M: { spent: 5, cap: 50 } }),
-    );
-    const session = openServeSession(dir);
+describe('spend across gateway processes', () => {
+  const SPEND = { kind: 'spend' as const, currency: 'CAD', amountMinor: 60 };
 
-    // The session spends 30 more against L.
-    expect(session.state.spendLedger.accrue('L', 30)).toBe(true);
+  /** Mint a lease capped at 100 minor units, the way `request` does. */
+  async function mintSpend(): Promise<string> {
+    savePolicyRules(dir, [
+      { ruleId: 'allow-spend', effect: 'allow', capabilityKind: 'spend', currency: 'CAD' },
+    ]);
+    const state = loadState(dir);
+    const { broker } = wireComponents(state);
+    const result = await broker.request({
+      agentId: 'agent',
+      taskId: 'task',
+      capabilities: [{ kind: 'spend', currency: 'CAD', capMinor: 100 }],
+      requestedDurationMs: 60_000,
+    });
+    if (result.type !== 'granted') throw new Error(`could not mint: ${JSON.stringify(result)}`);
+    saveState(state);
+    return result.token;
+  }
 
-    // Meanwhile another process persisted its own 15 against L.
-    writeFileSync(
-      join(dir, 'spend.json'),
-      JSON.stringify({ L: { spent: 25, cap: 100 }, M: { spent: 5, cap: 50 } }),
-    );
+  it('two concurrent sessions share one cap', async () => {
+    const token = await mintSpend();
+    const a = openServeSession(dir);
+    const b = openServeSession(dir);
 
-    session.save();
+    expect(wireComponents(a.state).enforcer.check(token, SPEND).ok).toBe(true); // 60 of 100
+    const second = wireComponents(b.state).enforcer.check(token, SPEND); // 120 of 100
 
-    const after = JSON.parse(readFileSync(join(dir, 'spend.json'), 'utf8')) as Record<
-      string,
-      { spent: number; cap: number }
-    >;
-    expect(after['L']).toEqual({ spent: 55, cap: 100 }); // 25 on disk + this session's 30
-    expect(after['M']).toEqual({ spent: 5, cap: 50 });
+    expect(second.ok).toBe(false);
+    expect(second.reason).toContain('spend cap exceeded');
+  });
+
+  it('records spend as it happens, before any shutdown save', async () => {
+    const token = await mintSpend();
+    const a = openServeSession(dir);
+
+    wireComponents(a.state).enforcer.check(token, SPEND);
+
+    const onDisk = JSON.parse(readFileSync(join(dir, 'spend.json'), 'utf8')) as Record<string, { spent: number }>;
+    expect(Object.values(onDisk).map((e) => e.spent)).toEqual([60]);
+  });
+
+  it('a short-lived command saving a stale snapshot does not erase spend recorded meanwhile', async () => {
+    const token = await mintSpend();
+    const staleCommand = loadState(dir); // e.g. `revoke`, loaded before the spend below
+    const a = openServeSession(dir);
+    wireComponents(a.state).enforcer.check(token, SPEND);
+
+    saveState(staleCommand); // ...and saved after it
+
+    const onDisk = JSON.parse(readFileSync(join(dir, 'spend.json'), 'utf8')) as Record<string, { spent: number }>;
+    expect(Object.values(onDisk).map((e) => e.spent)).toEqual([60]);
   });
 });

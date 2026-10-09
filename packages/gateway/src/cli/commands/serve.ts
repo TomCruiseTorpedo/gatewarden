@@ -8,9 +8,10 @@
  * state directory (`--state-dir`, `GATEWARDEN_STATE_DIR`, or `.gatewarden/`),
  * the same place `gatewarden request` and `gatewarden revoke` write. That is
  * what lets a lease minted by `request` verify here and a revoked one be
- * refused, including one revoked while this process is running. On
- * SIGINT/SIGTERM only this session's own audit events and spend are merged
- * back; nothing else in the directory is rewritten.
+ * refused, including one revoked while this process is running. Spend is
+ * charged against `spend.json` under a lock as it happens, so every gateway
+ * sharing the directory shares one cap. On SIGINT/SIGTERM only this session's
+ * own audit events are merged back; nothing else in the directory is rewritten.
  *
  * The proxy server reads from stdin / writes to stdout (StdioServerTransport).
  * The downstream MCP server is spawned as a subprocess (StdioClientTransport).
@@ -138,8 +139,8 @@ export async function cmdServe(opts: ServeOptions): Promise<void> {
         ),
       ) + '\n',
     );
-    // Persist this session's audit events and spend. The session merges them
-    // onto what is on disk now rather than rewriting the state directory from
+    // Persist this session's audit events. The session merges them onto the
+    // log as it is on disk now rather than rewriting the state directory from
     // the snapshot taken at startup, which would undo anything `request` and
     // `revoke` did while this process was up. If the log was tampered with
     // meanwhile the save refuses; say so rather than exit with events unsaved.
