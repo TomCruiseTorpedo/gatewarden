@@ -22,7 +22,7 @@ import { introspect, jwksFromPrivateJwk, signAgentCard } from '@gatewarden/score
 import type { AgentCardJson } from '@gatewarden/score';
 import { loadConfig, wireGovern } from '../../config/index.js';
 import { loadPendingStore, openServeSession, resolveStateDir } from '../state.js';
-import { generateAgentCard, serveA2aFace } from '../../a2a/index.js';
+import { generateAgentCard, PerMessageBinding, serveA2aFace } from '../../a2a/index.js';
 import type { StdioDownstreamSpec } from '../../contract/index.js';
 import type { AgentCard } from '@a2a-js/sdk';
 
@@ -39,6 +39,11 @@ export interface A2aServeOptions {
   signingKey?: string;
   /** State directory holding the signing key and stores. Defaults per `resolveStateDir`. */
   stateDir?: string;
+  /**
+   * Require a lease token on every message instead of letting a context bind
+   * once and omit it afterwards (see `PerMessageBinding`).
+   */
+  requireTokenPerMessage?: boolean;
 }
 
 
@@ -120,6 +125,7 @@ export async function cmdA2aServe(opts: A2aServeOptions): Promise<void> {
       loadPendingStore(stateDir)
         .list()
         .some(({ request }) => request.taskId === contextId),
+    ...(opts.requireTokenPerMessage === true ? { binding: new PerMessageBinding() } : {}),
     ...(jwks !== undefined ? { jwks } : {}),
     ...(opts.port !== undefined ? { port: opts.port } : {}),
     ...(opts.host !== undefined ? { host: opts.host } : {}),
@@ -132,6 +138,17 @@ export async function cmdA2aServe(opts: A2aServeOptions): Promise<void> {
   console.error(`gatewarden a2a-serve: JSON-RPC     ${face.endpointUrl}`);
   console.error(
     `gatewarden a2a-serve: fronting "${server.name}" (${tools.length} tool(s)); lease extension required`,
+  );
+  // Say which posture is active. Under the default, a context that has presented
+  // a valid token is bound, and a later message on that contextId may omit the
+  // token, so the contextId is a bearer; an operator should not have to read the
+  // profile to learn that.
+  console.error(
+    opts.requireTokenPerMessage === true
+      ? 'gatewarden a2a-serve: token required on EVERY message (--require-token-per-message)'
+      : 'gatewarden a2a-serve: context binding ON — once a context has presented a valid token, ' +
+          'later messages on that contextId may omit it, so a bound contextId acts as a bearer. ' +
+          'Use --require-token-per-message to require the token every time.',
   );
 
   const shutdown = async (): Promise<void> => {

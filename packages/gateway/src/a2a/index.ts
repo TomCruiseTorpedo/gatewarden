@@ -38,3 +38,5 @@ export type {
 
 export { serveA2aFace } from './http.js';
 export type { ServeA2aFaceOptions, RunningA2aFace } from './http.js';
+
+export { PerMessageBinding } from './per-message-binding.js';

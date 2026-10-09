@@ -61,6 +61,17 @@ stored hash-chain verification (`gatewarden audit --verify`). Programmatic use
 (below) wires its own key per `wireGovern(config)` call unless you pass it
 persisted state.
 
+`a2a-serve` fronts the same governed tools as an A2A agent over HTTP
+(`gatewarden a2a-serve ./gateway.config.json --interface-url <public url>`). By
+default it follows the A2A lease profile's context binding: the first message on
+a `contextId` that presents a valid token binds the context, and later messages
+on it may omit the token. The face authenticates no caller, so a bound
+`contextId` then acts as a bearer: anyone who sends it, tokenless, gets that
+lease's authority. It listens on `127.0.0.1` unless you pass `--host`. Pass
+`--require-token-per-message` to remove that: nothing is bound, and every message
+must carry its own token, which is verified (signature, expiry, revocation,
+scope) each time. The startup banner states which posture is active.
+
 ### 4. Use programmatically
 
 ```ts

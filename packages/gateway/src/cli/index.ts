@@ -79,6 +79,8 @@ A2A COMMANDS (ADR-H)
   a2a-serve <config>     Serve the governed tool surface as a live A2A agent
                          (--interface-url required; --port <n>, --host <h>;
                           leases come from the state dir, like serve;
+                          --require-token-per-message: token on EVERY message,
+                          no bearer contextId;
                           --signing-key <jwk> serves a SIGNED card + JWKS;
                           well-known card + JSON-RPC endpoint, lease-gated)
   a2a-keygen             Mint a card-signing key pair (--out <dir>;
@@ -430,6 +432,7 @@ async function main(): Promise<void> {
           description: { type: 'string' as const },
           'card-version': { type: 'string' as const },
           'signing-key': { type: 'string' as const },
+          'require-token-per-message': { type: 'boolean' as const },
         },
         allowPositionals: true,
         strict: false,
@@ -459,6 +462,7 @@ async function main(): Promise<void> {
           ? { signingKey: values['signing-key'] }
           : {}),
         stateDir: resolvedStateDir,
+        ...(values['require-token-per-message'] === true ? { requireTokenPerMessage: true } : {}),
       });
       break;
     }
