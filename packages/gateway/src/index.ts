@@ -34,6 +34,7 @@ export type {
   ToolActionMapping,
   GatewayConfig,
   GatewaySnapshot,
+  TaintRule,
   // Schema inferred types
   GatewayConfigInput,
   GatewayConfigOutput,
@@ -43,6 +44,7 @@ export {
   DownstreamSpecSchema,
   ToolActionMappingSchema,
   GatewayConfigSchema,
+  TaintRuleSchema,
   buildToolActionResolver,
 } from './contract/index.js';
 
@@ -60,7 +62,8 @@ export type { ScoringOptions } from './scoring/index.js';
 
 // ── Proxy (gateway-004) ───────────────────────────────────────────────────
 
-export { GatewardenProxy } from './proxy/index.js';
+export { GatewardenProxy, carriesUntrustedMarker } from './proxy/index.js';
+export type { ProxyOptions, TaintRecord } from './proxy/index.js';
 
 // ── A2A downstream lane (ADR-H) ───────────────────────────────────────────
 

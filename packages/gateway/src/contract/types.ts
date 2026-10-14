@@ -139,6 +139,37 @@ export interface GatewayConfig {
     /** Enable LLM-based eval scoring (off by default, R2). */
     eval?: boolean;
   };
+  /** Optional session taint rule (ADR-K). Absent means no taint tracking. */
+  taint?: TaintRule;
+}
+
+// ---------------------------------------------------------------------------
+// TaintRule — gate effectful tools after untrusted content (ADR-K)
+// ---------------------------------------------------------------------------
+
+/**
+ * Session taint rule (ADR-K).
+ *
+ * A connection becomes TAINTED the first time either:
+ *   - a downstream result (success or error) carries
+ *     `_meta.provenance.untrusted_content: true`, or
+ *   - a tool listed in `sources` is called.
+ * From then until the connection's next `initialize`, calls to tools listed in
+ * `sinks` are denied (`mode: 'deny'`) or forwarded with the taint recorded on
+ * their audit event (`mode: 'audit'`).
+ *
+ * Sinks are chosen by the operator by tool name. The downstream server's own
+ * annotations (`readOnlyHint`, `destructiveHint`) are deliberately NOT used:
+ * the server is the party being governed, and a hostile one could mark every
+ * tool read-only.
+ */
+export interface TaintRule {
+  /** `deny` (default) refuses sink calls once tainted; `audit` forwards and records. */
+  mode: 'deny' | 'audit';
+  /** Tool names whose calls taint the connection, marker or not. */
+  sources: string[];
+  /** Tool names gated once the connection is tainted. At least one. */
+  sinks: string[];
 }
 
 // ---------------------------------------------------------------------------

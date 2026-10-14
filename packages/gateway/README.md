@@ -104,6 +104,39 @@ const snapshot = await proxy.attach(upstream, downstream);
 console.log('Score:', snapshot.scorecard.lintScore);
 ```
 
+### 5. Gate effectful tools after untrusted content (optional)
+
+Content a tool returns from outside — a web page, a log, a file the agent did not
+write — can carry text written as instructions to the agent. The `taint` rule
+stops a connection that has read such content from then reaching the tools you
+name as sinks:
+
+```json
+{
+  "downstream": { "transport": "stdio", "command": "npx", "args": ["-y", "some-mcp-server"] },
+  "taint": {
+    "mode": "deny",
+    "sources": ["fetch_url", "read_log"],
+    "sinks": ["run_command", "write_file", "send_email"]
+  }
+}
+```
+
+- A connection is **tainted** the first time a tool in `sources` is called, or
+  a result (including an error) carries `_meta.provenance.untrusted_content: true`.
+  That marker is a convention some servers set, not part of the MCP
+  specification, so list the sources you know about rather than relying on it.
+- Once tainted, calls to `sinks` are denied for the rest of the connection.
+  Each denial names the tool that tainted it. Other tools keep working, and
+  a new `initialize` starts the connection clean.
+- `"mode": "audit"` forwards sink calls instead and records `taintSink` and
+  `taintedBy` on their audit events, so you can trial the rule before enforcing it.
+- Sinks are chosen by name, never from the downstream server's own
+  `readOnlyHint`/`destructiveHint` annotations: the server is the party being
+  governed. Design notes: ADR-K in `docs/adrs.md`.
+
+Programmatically: `new GatewardenProxy(bundle, {}, { taint: config.taint })`.
+
 ## Public API
 
 | Export | Description |
