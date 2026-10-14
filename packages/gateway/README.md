@@ -19,7 +19,7 @@ bun add @gatewarden/gateway
 ```json
 {
   "downstream": {
-    "kind": "stdio",
+    "transport": "stdio",
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
   },
