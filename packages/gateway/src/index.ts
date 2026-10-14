@@ -62,7 +62,7 @@ export type { ScoringOptions } from './scoring/index.js';
 
 // ── Proxy (gateway-004) ───────────────────────────────────────────────────
 
-export { GatewardenProxy, carriesUntrustedMarker } from './proxy/index.js';
+export { GatewardenProxy, carriesUntrustedMarker, errorCarriesUntrustedMarker } from './proxy/index.js';
 export type { ProxyOptions, TaintRecord } from './proxy/index.js';
 
 // ── A2A downstream lane (ADR-H) ───────────────────────────────────────────

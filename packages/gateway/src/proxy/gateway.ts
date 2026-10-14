@@ -90,6 +90,30 @@ export function carriesUntrustedMarker(result: unknown): boolean {
   );
 }
 
+/**
+ * True when a THROWN downstream error carries the marker in its JSON-RPC
+ * `data`, either as `data._meta.provenance` or as `data.provenance`.
+ *
+ * A downstream that answers a tool call with a JSON-RPC error, rather than an
+ * `isError` result, makes `callTool` throw. The error's message and data still
+ * reach the agent, so a marker there must taint like one on a result. An error
+ * WITHOUT the marker does not taint: transport failures and timeouts carry no
+ * target content, and treating every error as untrusted would make the rule
+ * fire on network noise.
+ */
+export function errorCarriesUntrustedMarker(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false;
+  const data = (error as { data?: unknown }).data;
+  if (data === null || typeof data !== 'object') return false;
+  if (carriesUntrustedMarker(data)) return true;
+  const provenance = (data as { provenance?: unknown }).provenance;
+  return (
+    provenance !== null &&
+    typeof provenance === 'object' &&
+    (provenance as { untrusted_content?: unknown }).untrusted_content === true
+  );
+}
+
 /** Outcome of the taint gate for one call. */
 type TaintGateResult =
   | { denied: false; detail: Record<string, unknown> }
@@ -312,8 +336,8 @@ export class GatewardenProxy {
    * operator has declared its output untrusted, and a call that fails midway
    * may still have delivered some of it. The marker can only be read once the
    * result is back. It counts on error results too, because a failure can
-   * carry target-derived text. A call that throws at the protocol level has no
-   * result to read.
+   * carry target-derived text, and on a THROWN JSON-RPC error whose `data`
+   * carries it, because that error's text reaches the agent as well.
    */
   private async forward(
     bindingKey: string,
@@ -323,7 +347,15 @@ export class GatewardenProxy {
     if (this.taint !== undefined && this.taint.sources.includes(toolName)) {
       this.markTainted(bindingKey, { tool: toolName, via: 'source-list' });
     }
-    const result = await this.downstreamClient.callTool({ name: toolName, arguments: toolArgs });
+    let result: Awaited<ReturnType<Client['callTool']>>;
+    try {
+      result = await this.downstreamClient.callTool({ name: toolName, arguments: toolArgs });
+    } catch (error) {
+      if (this.taint !== undefined && errorCarriesUntrustedMarker(error)) {
+        this.markTainted(bindingKey, { tool: toolName, via: 'marker' });
+      }
+      throw error;
+    }
     if (this.taint !== undefined && carriesUntrustedMarker(result)) {
       this.markTainted(bindingKey, { tool: toolName, via: 'marker' });
     }

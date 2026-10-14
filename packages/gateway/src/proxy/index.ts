@@ -10,5 +10,5 @@
  *   const snapshot = await proxy.attach(clientTransport, downstreamTransport);
  */
 
-export { GatewardenProxy, carriesUntrustedMarker } from './gateway.js';
+export { GatewardenProxy, carriesUntrustedMarker, errorCarriesUntrustedMarker } from './gateway.js';
 export type { ProxyOptions, TaintRecord } from './gateway.js';
