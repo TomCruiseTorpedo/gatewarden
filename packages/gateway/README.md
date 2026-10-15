@@ -19,7 +19,7 @@ bun add @gatewarden/gateway
 ```json
 {
   "downstream": {
-    "kind": "stdio",
+    "transport": "stdio",
     "command": "npx",
     "args": ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
   },
@@ -110,7 +110,7 @@ console.log('Score:', snapshot.scorecard.lintScore);
 |---|---|
 | `GatewardenProxy` | Fused scoring + enforcement proxy. `attach(client, downstream)` → `GatewaySnapshot`. |
 | `loadConfig(path)` | Load + validate a `GatewayConfig` from a JSON or JS file. |
-| `ConfigLoadError` | Typed error thrown by `loadConfig` (codes: `FILE_NOT_FOUND`, `PARSE_ERROR`, `VALIDATION_ERROR`). |
+| `ConfigLoadError` | Typed error thrown by `loadConfig` (codes: `NOT_FOUND`, `PARSE_ERROR`, `INVALID_CONFIG`, `UNSUPPORTED_FORMAT`). |
 | `wireGovern(config)` | Build the full govern runtime (`GovernBundle`) from a validated config. |
 | `attachSnapshot(client, opts?)` | Score a downstream MCP client → immutable `GatewaySnapshot`. |
 | `rescore(client, opts?)` | Fresh score — always returns a new snapshot (never mutates). |
