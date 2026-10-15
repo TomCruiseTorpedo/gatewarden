@@ -70,9 +70,9 @@ describe('barrel smoke — config', () => {
 
   it('exports ConfigLoadError as a class', () => {
     expect(typeof ConfigLoadError).toBe('function');
-    const err = new ConfigLoadError('FILE_NOT_FOUND', 'missing.json');
+    const err = new ConfigLoadError('NOT_FOUND', 'missing.json');
     expect(err).toBeInstanceOf(Error);
-    expect(err.code).toBe('FILE_NOT_FOUND');
+    expect(err.code).toBe('NOT_FOUND');
   });
 
   it('exports wireGovern as a function', () => {
