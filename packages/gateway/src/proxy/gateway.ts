@@ -46,11 +46,78 @@ import {
   ListToolsRequestSchema,
   SUPPORTED_PROTOCOL_VERSIONS,
 } from '@modelcontextprotocol/sdk/types.js';
-import type { AuditEvent, AuditEventInput } from '@gatewarden/govern';
+import type { AuditEvent, AuditEventInput, Lease } from '@gatewarden/govern';
 import type { GovernBundle } from '../config/index.js';
-import type { GatewaySnapshot } from '../contract/index.js';
+import type { GatewaySnapshot, TaintRule } from '../contract/index.js';
 import { attachSnapshot, rescore as rescoreDownstream } from '../scoring/index.js';
 import type { ScoringOptions } from '../scoring/index.js';
+
+// ---------------------------------------------------------------------------
+// Session taint (ADR-K)
+// ---------------------------------------------------------------------------
+
+/** Proxy behaviour beyond scoring. */
+export interface ProxyOptions {
+  /** Session taint rule (ADR-K). Absent means no taint tracking at all. */
+  taint?: TaintRule;
+}
+
+/** What tainted a connection: the first tool, and how it was recognised. */
+export interface TaintRecord {
+  /** The tool whose call or result tainted the connection. */
+  tool: string;
+  /** `marker`: its result carried the untrusted-content marker. `source-list`: it is in `taint.sources`. */
+  via: 'marker' | 'source-list';
+}
+
+/**
+ * True when a tool result carries `_meta.provenance.untrusted_content: true`.
+ *
+ * This is a convention, not part of the MCP specification: it comes from
+ * `morluto/rea`, which marks every result (and error) whose content came from
+ * an analysis target. Most servers never set it, which is why `taint.sources`
+ * exists alongside it.
+ */
+export function carriesUntrustedMarker(result: unknown): boolean {
+  if (result === null || typeof result !== 'object') return false;
+  const meta = (result as { _meta?: unknown })._meta;
+  if (meta === null || typeof meta !== 'object') return false;
+  const provenance = (meta as { provenance?: unknown }).provenance;
+  return (
+    provenance !== null &&
+    typeof provenance === 'object' &&
+    (provenance as { untrusted_content?: unknown }).untrusted_content === true
+  );
+}
+
+/**
+ * True when a THROWN downstream error carries the marker in its JSON-RPC
+ * `data`, either as `data._meta.provenance` or as `data.provenance`.
+ *
+ * A downstream that answers a tool call with a JSON-RPC error, rather than an
+ * `isError` result, makes `callTool` throw. The error's message and data still
+ * reach the agent, so a marker there must taint like one on a result. An error
+ * WITHOUT the marker does not taint: transport failures and timeouts carry no
+ * target content, and treating every error as untrusted would make the rule
+ * fire on network noise.
+ */
+export function errorCarriesUntrustedMarker(error: unknown): boolean {
+  if (error === null || typeof error !== 'object') return false;
+  const data = (error as { data?: unknown }).data;
+  if (data === null || typeof data !== 'object') return false;
+  if (carriesUntrustedMarker(data)) return true;
+  const provenance = (data as { provenance?: unknown }).provenance;
+  return (
+    provenance !== null &&
+    typeof provenance === 'object' &&
+    (provenance as { untrusted_content?: unknown }).untrusted_content === true
+  );
+}
+
+/** Outcome of the taint gate for one call. */
+type TaintGateResult =
+  | { denied: false; detail: Record<string, unknown> }
+  | { denied: true; result: { content: Array<{ type: 'text'; text: string }>; isError: true } };
 
 // ---------------------------------------------------------------------------
 // GatewardenProxy
@@ -94,10 +161,22 @@ export class GatewardenProxy {
   /** Immutable snapshot captured at attach time (R3). */
   private snapshot: GatewaySnapshot | undefined;
 
+  /**
+   * Taint per binding key (ADR-K): the FIRST thing that tainted the
+   * connection. Cleared at that connection's next `initialize`, for the same
+   * reason the lease binding is: the handshake starts a new connection.
+   */
+  private readonly taintByBinding = new Map<string, TaintRecord>();
+
+  /** Session taint rule, or undefined when the operator configured none. */
+  private readonly taint: TaintRule | undefined;
+
   constructor(
     private readonly bundle: GovernBundle,
     private readonly opts: ScoringOptions = {},
+    proxyOptions: ProxyOptions = {},
   ) {
+    this.taint = proxyOptions.taint;
     this.downstreamClient = new Client(
       { name: 'gatewarden-proxy-downstream', version: '1.0.0' },
       { capabilities: {} },
@@ -133,6 +212,8 @@ export class GatewardenProxy {
       } else {
         this.sessionTokens.delete(bindingKey);
       }
+      // A new handshake is a new connection: it starts untainted (ADR-K).
+      this.taintByBinding.delete(bindingKey);
 
       // Protocol version negotiation (mirrors SDK's own logic).
       const requested = request.params.protocolVersion;
@@ -157,6 +238,7 @@ export class GatewardenProxy {
     this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       const toolName = request.params.name;
       const toolArgs = request.params.arguments ?? {};
+      const bindingKey = extra.sessionId ?? SINGLE_CONNECTION_KEY;
 
       // Resolve tool → Action.  Returns undefined for unmapped tools (R5).
       const action = this.bundle.resolver(toolName, toolArgs);
@@ -169,28 +251,30 @@ export class GatewardenProxy {
       // here. Conflating them would make the log claim governance it did not
       // perform. No leaseId — nothing was verified to attribute this to.
       if (action === undefined) {
+        // The taint gate (ADR-K) runs BEFORE the passthrough: an unmapped sink
+        // is exactly the ungoverned call the rule exists to catch.
+        const gate = this.taintGate(bindingKey, toolName, undefined);
+        if (gate.denied) return gate.result;
+
         this.appendEvent({
           type: 'passthrough',
           detail: {
             toolName,
             reason: 'no capability mapped to this tool name — forwarded without a lease check',
+            ...gate.detail,
           },
         });
-        const result = await this.downstreamClient.callTool({
-          name: toolName,
-          arguments: toolArgs,
-        });
-        return result as unknown as { content: (typeof result)['content'] };
+        return this.forward(bindingKey, toolName, toolArgs);
       }
 
       // Look up the lease token for this session.
-      const token = this.sessionTokens.get(extra.sessionId ?? SINGLE_CONNECTION_KEY);
+      const token = this.sessionTokens.get(bindingKey);
 
       if (token === undefined) {
         // No token at all — deny and audit (R4).
         this.appendEvent({
           type: 'denial',
-          detail: { toolName, reason: 'no lease token bound to session' },
+          detail: { toolName, reason: 'no lease token bound to session', ...this.taintDetail(bindingKey) },
         });
         return this.denyResult('no lease token bound to session');
       }
@@ -216,10 +300,17 @@ export class GatewardenProxy {
             reason,
             action,
             ...(check.lease !== undefined ? { taskId: check.lease.taskId } : {}),
+            ...this.taintDetail(bindingKey),
           },
         });
         return this.denyResult(reason);
       }
+
+      // The lease permits the call, but a tainted connection may still not
+      // reach a sink (ADR-K). Checked after verification so the denial can
+      // name the lease that tried.
+      const gate = this.taintGate(bindingKey, toolName, check.lease);
+      if (gate.denied) return gate.result;
 
       // Permitted — emit use event and forward (R7).
       //
@@ -228,14 +319,101 @@ export class GatewardenProxy {
       this.appendEvent({
         type: 'use',
         leaseId: check.lease.id,
-        detail: { toolName, action, taskId: check.lease.taskId },
+        detail: { toolName, action, taskId: check.lease.taskId, ...gate.detail },
       });
-      const downstream = await this.downstreamClient.callTool({
-        name: toolName,
-        arguments: toolArgs,
-      });
-      return downstream as unknown as { content: (typeof downstream)['content'] };
+      return this.forward(bindingKey, toolName, toolArgs);
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Forwarding and session taint (ADR-K)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Forward one call downstream and update the connection's taint.
+   *
+   * A `taint.sources` tool taints the connection BEFORE it is forwarded: the
+   * operator has declared its output untrusted, and a call that fails midway
+   * may still have delivered some of it. The marker can only be read once the
+   * result is back. It counts on error results too, because a failure can
+   * carry target-derived text, and on a THROWN JSON-RPC error whose `data`
+   * carries it, because that error's text reaches the agent as well.
+   */
+  private async forward(
+    bindingKey: string,
+    toolName: string,
+    toolArgs: Record<string, unknown>,
+  ): Promise<{ content: unknown }> {
+    if (this.taint !== undefined && this.taint.sources.includes(toolName)) {
+      this.markTainted(bindingKey, { tool: toolName, via: 'source-list' });
+    }
+    let result: Awaited<ReturnType<Client['callTool']>>;
+    try {
+      result = await this.downstreamClient.callTool({ name: toolName, arguments: toolArgs });
+    } catch (error) {
+      if (this.taint !== undefined && errorCarriesUntrustedMarker(error)) {
+        this.markTainted(bindingKey, { tool: toolName, via: 'marker' });
+      }
+      throw error;
+    }
+    if (this.taint !== undefined && carriesUntrustedMarker(result)) {
+      this.markTainted(bindingKey, { tool: toolName, via: 'marker' });
+    }
+    return result as unknown as { content: (typeof result)['content'] };
+  }
+
+  /** Record the FIRST taint for a connection; later ones do not overwrite it. */
+  private markTainted(bindingKey: string, record: TaintRecord): void {
+    if (!this.taintByBinding.has(bindingKey)) {
+      this.taintByBinding.set(bindingKey, record);
+    }
+  }
+
+  /**
+   * `{ taintedBy }` for audit details once the connection is tainted, else
+   * nothing. Every event after the onset carries it, so the first such event
+   * locates the onset in the log. govern's audit event kinds are vendored
+   * verbatim, so the onset has no event kind of its own.
+   */
+  private taintDetail(bindingKey: string): Record<string, unknown> {
+    const taint = this.taintByBinding.get(bindingKey);
+    return taint !== undefined ? { taintedBy: { ...taint } } : {};
+  }
+
+  /**
+   * Decide whether a call to `toolName` may proceed on a tainted connection.
+   *
+   * Passes when no rule is configured, the connection is untainted, or the
+   * tool is not a sink. In `audit` mode a sink passes with `taintSink: true`
+   * in its detail. In `deny` mode a sink is refused with a denial event that
+   * names the tool that tainted the connection, attributed to the verified
+   * lease when there is one.
+   */
+  private taintGate(bindingKey: string, toolName: string, lease: Lease | undefined): TaintGateResult {
+    const detail = this.taintDetail(bindingKey);
+    const taint = this.taintByBinding.get(bindingKey);
+    if (this.taint === undefined || taint === undefined || !this.taint.sinks.includes(toolName)) {
+      return { denied: false, detail };
+    }
+    if (this.taint.mode === 'audit') {
+      return { denied: false, detail: { ...detail, taintSink: true } };
+    }
+
+    const how = taint.via === 'marker' ? 'returned content marked untrusted' : 'is a configured taint source';
+    const reason =
+      `session tainted: '${taint.tool}' ${how}, so sink '${toolName}' is blocked ` +
+      'until the client starts a new connection';
+    this.appendEvent({
+      type: 'denial',
+      ...(lease !== undefined ? { leaseId: lease.id } : {}),
+      detail: {
+        toolName,
+        reason,
+        ...(lease !== undefined ? { taskId: lease.taskId } : {}),
+        ...detail,
+      },
+    });
+    return { denied: true, result: this.denyResult(reason) };
   }
 
   // ---------------------------------------------------------------------------

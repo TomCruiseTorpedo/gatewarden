@@ -87,7 +87,9 @@ export async function cmdServe(opts: ServeOptions): Promise<void> {
     process.exit(1);
   }
   const bundle = wireGovern(config, session.state);
-  const proxy = new GatewardenProxy(bundle);
+  // The taint rule (ADR-K) is optional; with none configured the proxy
+  // tracks no taint and behaves exactly as before.
+  const proxy = new GatewardenProxy(bundle, {}, { taint: config.taint });
 
   const clientTransport = new StdioServerTransport();
   const downstreamTransport = new StdioClientTransport({

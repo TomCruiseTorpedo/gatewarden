@@ -37,6 +37,7 @@ export type {
   ToolActionMapping,
   GatewayConfig,
   GatewaySnapshot,
+  TaintRule,
   // A2A downstream lane (ADR-H)
   A2aDownstreamSpec,
   A2aGatewaySnapshot,
@@ -50,6 +51,7 @@ export {
   DownstreamSpecSchema,
   ToolActionMappingSchema,
   GatewayConfigSchema,
+  TaintRuleSchema,
 } from './schemas.js';
 
 export type { GatewayConfigInput, GatewayConfigOutput } from './schemas.js';

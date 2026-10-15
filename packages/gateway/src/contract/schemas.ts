@@ -80,6 +80,21 @@ export const ToolActionMappingSchema = z.discriminatedUnion('kind', [
 // ---------------------------------------------------------------------------
 
 /**
+ * Zod schema for the session taint rule (ADR-K).
+ *
+ * Strict, so a misspelt key (`sink` for `sinks`) fails loudly instead of being
+ * stripped into a rule that gates nothing. `sinks` needs at least one entry for
+ * the same reason: an empty sink list would track taint and block nothing.
+ */
+export const TaintRuleSchema = z
+  .object({
+    mode: z.enum(['deny', 'audit']).default('deny'),
+    sources: z.array(z.string().min(1)).default([]),
+    sinks: z.array(z.string().min(1)).min(1, 'taint.sinks must name at least one tool'),
+  })
+  .strict();
+
+/**
  * Zod schema for GatewayConfig.
  *
  * R9 enforcement: `downstream` is a single DownstreamSpec object. A config
@@ -93,6 +108,7 @@ export const GatewayConfigSchema = z
     downstream: DownstreamSpecSchema,
     policy: z.array(PolicyRuleSchema).default([]),
     toolActions: z.array(ToolActionMappingSchema).default([]),
+    taint: TaintRuleSchema.optional(),
     scoring: z
       .object({
         eval: z.boolean().optional(),
