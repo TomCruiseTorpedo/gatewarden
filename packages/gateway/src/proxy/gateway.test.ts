@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -965,8 +966,10 @@ describe('GatewardenProxy over a real stdio transport', () => {
 
   it('binds the lease token presented at initialize and forwards an in-scope call', async () => {
     // Guards the premise: if the SDK ever starts setting a stdio sessionId,
-    // these tests would stop exercising the session-less path.
-    expect(stdioTransport.sessionId).toBeUndefined();
+    // these tests would stop exercising the session-less path. sessionId is
+    // declared on the Transport interface, not on StdioServerTransport.
+    const transport: Transport = stdioTransport;
+    expect(transport.sessionId).toBeUndefined();
 
     const token = signer.issue(makeLease({ capabilities: [{ kind: 'fs.read', paths: ['/data/**'] }] }));
     await handshake(token);
